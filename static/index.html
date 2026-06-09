@@ -1,0 +1,1028 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>VRP Route Optimizer | The Cary Company</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --primary: #5b8fff; --primary-dark: #3a6fdf; --primary-light: rgba(91,143,255,.18);
+    --accent: #b8d800; --accent-soft: rgba(184,216,0,.15);
+    --bg:  hsl(220deg 35% 10%);
+    --bg2: hsl(220deg 30% 14%);
+    --bg3: hsl(220deg 28% 18%);
+    --text: hsl(220deg 20% 92%); --text2: hsl(220deg 15% 65%); --text3: hsl(220deg 12% 45%);
+    --border: rgba(91,143,255,.14); --border2: rgba(91,143,255,.24);
+    --danger-bg: rgba(248,113,113,.12); --danger: #f87171; --danger-border: rgba(248,113,113,.3);
+    --delivery: #5b8fff; --delivery-bg: rgba(91,143,255,.14); --delivery-border: rgba(91,143,255,.3);
+    --pickup: #34d399;  --pickup-bg: rgba(52,211,153,.12);  --pickup-border: rgba(52,211,153,.3);
+    --radius: 10px; --radius-lg: 16px;
+    --shadow-sm: 0 4px 20px rgba(0,0,0,.35);
+    --shadow-md: 0 10px 40px rgba(0,0,0,.5);
+    --card-color: hsl(220deg 35% 10%);
+    --hue-speed: 1;
+  }
+  body {
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    color:var(--text);
+    min-height:100vh;
+    background: var(--card-color);
+    overflow-x: hidden;
+  }
+
+  /* Animated hue orbs — same technique as glowing-shadow component */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    background:
+      radial-gradient(ellipse 65% 45% at 10% 10%,
+        hsl(calc(var(--page-hue, 220) * 1deg) 65% 30%) 0%,
+        transparent 55%),
+      radial-gradient(ellipse 55% 40% at 90% 80%,
+        hsl(calc(var(--page-hue2, 200) * 1deg) 60% 25%) 0%,
+        transparent 50%),
+      radial-gradient(ellipse 40% 35% at 55% 45%,
+        hsl(calc(var(--page-hue3, 240) * 1deg) 50% 20%) 0%,
+        transparent 45%);
+    animation: page-hue-shift 10s linear infinite;
+    pointer-events: none;
+  }
+
+  @property --page-hue  { syntax:"<number>"; inherits:true; initial-value:260; }
+  @property --page-hue2 { syntax:"<number>"; inherits:true; initial-value:200; }
+  @property --page-hue3 { syntax:"<number>"; inherits:true; initial-value:300; }
+
+  @keyframes page-hue-shift {
+    0%   { --page-hue: 220; --page-hue2: 200; --page-hue3: 240; }
+    33%  { --page-hue: 210; --page-hue2: 225; --page-hue3: 215; }
+    66%  { --page-hue: 235; --page-hue2: 205; --page-hue3: 230; }
+    100% { --page-hue: 220; --page-hue2: 200; --page-hue3: 240; }
+  }
+
+  .page { position: relative; z-index: 1; }
+  .page { max-width:960px; margin:0 auto; padding:2rem 1rem 3rem; }
+
+  .brand-wrap { margin-bottom:1.4rem; }
+  .brand-card { background:var(--bg2); border:1px solid var(--border2); border-radius:20px; box-shadow:var(--shadow-md); padding:1.2rem 1.2rem 1rem; text-align:center; overflow:hidden; backdrop-filter:blur(12px); }
+  .brand-card::after { content:""; display:block; width:100%; height:3px; background:linear-gradient(90deg,hsl(calc(var(--page-hue,220)*1deg) 90% 65%),hsl(calc(var(--page-hue2,200)*1deg) 90% 65%),hsl(calc(var(--page-hue3,240)*1deg) 90% 65%)); border-radius:999px; margin-top:1rem; animation:page-hue-shift 8s linear infinite; }
+  .brand-logo { display:flex; justify-content:center; margin-bottom:.9rem; }
+  .brand-logo img { max-width:360px; width:100%; height:auto; }
+  h1 { font-size:24px; font-weight:700; color:var(--text); margin-bottom:6px; letter-spacing:-.02em; }
+  .subtitle { font-size:13px; color:var(--text3); }
+
+  .tabs { display:flex; gap:4px; margin-bottom:1.2rem; background:rgba(255,255,255,.04); padding:6px; border-radius:14px; border:1px solid var(--border); box-shadow:var(--shadow-sm); backdrop-filter:blur(12px); }
+  .tab { flex:1; padding:10px 14px; font-size:13px; cursor:pointer; color:var(--text2); border-radius:10px; text-align:center; user-select:none; transition:all .2s; font-weight:500; }
+  .tab.on { color:#fff; font-weight:700; background:linear-gradient(135deg,var(--primary),var(--primary-dark)); box-shadow:0 8px 18px rgba(31,63,143,.16); }
+  .tab:hover:not(.on) { color:var(--text); background:rgba(255,255,255,.07); }
+  .pane { display:none; } .pane.on { display:block; }
+
+  .lbl { font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:hsl(220deg 80% 72%); margin-bottom:10px; }
+  .card { background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius-lg); padding:1rem 1.25rem; margin-bottom:1rem; box-shadow:var(--shadow-sm); backdrop-filter:blur(10px); }
+
+  input[type=text],input[type=number],select {
+    height:36px; padding:0 10px; border-radius:var(--radius); border:1px solid var(--border2);
+    background:var(--bg3); color:var(--text); font-size:12px; font-family:inherit; width:100%;
+    transition:border-color .2s,box-shadow .2s; appearance:none;
+  }
+  input:focus,select:focus { outline:none; border-color:var(--primary); background:var(--bg2); box-shadow:0 0 0 3px rgba(123,143,255,.15); }
+  input::placeholder { color:var(--text3); }
+  select { background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%236b6b8a' stroke-width='2.5'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 8px center; padding-right:24px; background-color:var(--bg3); }
+
+  .btn { height:36px; padding:0 14px; border-radius:var(--radius); border:1px solid var(--border2); background:var(--bg3); color:var(--text); font-size:13px; font-family:inherit; cursor:pointer; display:inline-flex; align-items:center; gap:6px; white-space:nowrap; transition:all .2s; font-weight:500; }
+  .btn:hover { background:rgba(123,143,255,.15); transform:translateY(-1px); }
+  .btn:active { transform:scale(.98); }
+  .btn-p { background:linear-gradient(135deg,var(--primary),var(--primary-dark)); color:#fff; border-color:var(--primary-dark); font-weight:600; box-shadow:0 8px 20px rgba(31,63,143,.18); }
+  .btn-p:hover { opacity:.95; background:linear-gradient(135deg,var(--primary),var(--primary-dark)); }
+  .btn-d { color:var(--danger); border-color:var(--danger-border); padding:0; width:28px; height:28px; justify-content:center; }
+  .btn-d:hover { background:var(--danger-bg); }
+  .ebox { background:rgba(248,113,113,.1); border:1px solid rgba(248,113,113,.3); border-radius:var(--radius); padding:10px 14px; font-size:13px; color:#f87171; margin-bottom:10px; }
+  .spin { display:inline-block; width:13px; height:13px; border:2px solid rgba(255,255,255,.35); border-top-color:#fff; border-radius:50%; animation:sp .7s linear infinite; vertical-align:-2px; }
+  @keyframes sp { to { transform:rotate(360deg); } }
+
+  /* Geo badge */
+  .gbadge { font-size:10px; padding:3px 8px; border-radius:99px; font-weight:600; flex-shrink:0; white-space:nowrap; }
+  .gok  { background:rgba(74,222,128,.15); color:#4ade80; }
+  .gfail{ background:rgba(248,113,113,.15); color:#f87171; }
+  .gpend{ background:rgba(255,255,255,.07); color:var(--text3); }
+
+  /* Stop section headers */
+  .stop-section-hd { display:flex; align-items:center; gap:10px; padding:8px 0 4px; }
+  .stop-section-pill { font-size:11px; font-weight:700; padding:3px 10px; border-radius:99px; }
+  .pill-delivery { background:rgba(91,143,255,.15); color:#82a8ff; border:1px solid rgba(91,143,255,.3); }
+  .pill-pickup   { background:rgba(74,222,128,.12); color:#4ade80; border:1px solid rgba(74,222,128,.3); }
+  .stop-section-line { flex:1; height:1px; background:var(--border); }
+
+  /* Column headers */
+  .col-hdr { display:grid; grid-template-columns:24px 1fr 64px 106px 106px 80px 28px; gap:7px; padding:0 0 6px; border-bottom:1px solid var(--border); margin-bottom:2px; }
+  .col-hdr span { font-size:10px; font-weight:600; color:var(--text3); text-align:center; }
+  .col-hdr span:nth-child(2) { text-align:left; }
+
+  /* Stop row */
+  .stop-row { display:grid; grid-template-columns:24px 1fr 64px 106px 106px 80px 28px; gap:7px; align-items:center; padding:9px 0; border-bottom:1px solid var(--border); }
+  .stop-row:last-child { border-bottom:none; }
+  .snum { width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; flex-shrink:0; }
+  .snum-d { background:rgba(91,143,255,.15); border:1px solid rgba(91,143,255,.3); color:#82a8ff; }
+  .snum-p { background:rgba(74,222,128,.12); border:1px solid rgba(74,222,128,.3); color:#4ade80; }
+
+  /* Zone / priority pills (display only) */
+  .zone-pill { font-size:10px; padding:2px 7px; border-radius:99px; font-weight:600; }
+  .z-commercial  { background:rgba(91,143,255,.15); color:#82a8ff; }
+  .z-residential { background:rgba(139,168,255,.15); color:#a8c0ff; }
+  .z-industrial  { background:rgba(251,146,60,.15); color:#fb923c; }
+  .z-airport     { background:rgba(34,211,238,.15); color:#22d3ee; }
+  .prio-pill { font-size:10px; padding:2px 7px; border-radius:99px; font-weight:600; }
+  .p1 { background:rgba(255,255,255,.07); color:var(--text3); }
+  .p2 { background:rgba(251,191,36,.15); color:#fbbf24; }
+  .p3 { background:rgba(248,113,113,.15); color:#f87171; }
+
+  /* Fleet tab */
+  .fleet-count-row { display:flex; align-items:center; gap:12px; padding:12px 0; border-bottom:1px solid var(--border); }
+  .fleet-count-row:last-child { border-bottom:none; }
+  .fc-icon { font-size:22px; flex-shrink:0; }
+  .fc-label { flex:1; }
+  .fc-name { font-size:13px; font-weight:700; }
+  .fc-desc { font-size:11px; color:var(--text3); margin-top:2px; }
+  .fc-zones { display:flex; flex-wrap:wrap; gap:4px; margin-top:5px; }
+  .fc-controls { display:flex; align-items:center; gap:8px; }
+  .fc-btn { width:28px; height:28px; border-radius:50%; border:1px solid var(--border2); background:var(--bg3); cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:18px; color:var(--text2); font-weight:300; transition:all .15s; line-height:1; }
+  .fc-btn:hover { background:var(--primary); color:#fff; border-color:var(--primary); }
+  .fc-num { font-size:16px; font-weight:700; color:var(--primary-dark); min-width:22px; text-align:center; }
+
+  .type-ref-row { display:flex; gap:10px; align-items:flex-start; padding:12px; border:1px solid var(--border); border-radius:var(--radius); background:var(--bg3); margin-bottom:8px; }
+  .type-ref-row:last-child { margin-bottom:0; }
+  .zone-legend-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .zone-legend-item { display:flex; align-items:center; gap:10px; padding:10px; background:var(--bg3); border-radius:8px; border:1px solid var(--border); }
+
+  /* Results */
+  .sgrid { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:1rem; }
+  .metric { background:var(--bg2); border-radius:var(--radius-lg); padding:14px; border:1px solid var(--border); box-shadow:var(--shadow-sm); }
+  .mval { font-size:24px; font-weight:700; color:var(--primary); }
+  .mlbl { font-size:11px; color:var(--text3); margin-top:4px; text-transform:uppercase; letter-spacing:.05em; }
+  .rcard { border:1px solid var(--border); border-radius:var(--radius-lg); margin-bottom:12px; overflow:hidden; background:var(--bg2); box-shadow:var(--shadow-sm); }
+  .rhead { display:flex; align-items:center; gap:10px; padding:12px 14px; border-bottom:1px solid var(--border); }
+  .rstops { padding:0 14px; }
+  .rstop { display:flex; align-items:flex-start; gap:10px; padding:9px 0; border-bottom:1px solid var(--border); }
+  .rstop:last-child { border-bottom:none; }
+  .dot { width:8px; height:8px; border-radius:50%; border:2px solid; flex-shrink:0; margin-top:4px; }
+  .vl  { width:2px; height:14px; background:var(--border2); margin:0 auto; }
+  .type-pill { font-size:10px; padding:2px 7px; border-radius:99px; font-weight:700; }
+  .tp-d    { background:rgba(91,143,255,.15); color:#82a8ff; }
+  .tp-p    { background:rgba(74,222,128,.12); color:#4ade80; }
+  .tp-dep  { background:rgba(255,255,255,.08); color:var(--text2); }
+
+  /* Map */
+  #map { height:480px; border-radius:var(--radius-lg); border:1px solid var(--border); overflow:hidden; margin-bottom:12px; box-shadow:var(--shadow-sm); }
+  .map-status { font-size:11px; padding:4px 10px; border-radius:99px; display:inline-flex; align-items:center; gap:5px; margin-bottom:10px; font-weight:600; }
+  .ms-real { background:rgba(74,222,128,.12); color:#4ade80; }
+  .ms-fall { background:rgba(251,191,36,.12); color:#fbbf24; }
+  .legend { display:flex; flex-wrap:wrap; gap:10px; margin-top:8px; }
+  .leg-item { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--text2); }
+  .leg-line { width:22px; height:3px; border-radius:2px; }
+  .map-key { display:flex; flex-wrap:wrap; gap:10px; margin-bottom:10px; }
+  .map-key-item { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--text2); }
+
+  /* Matrix */
+  .mtable { width:100%; font-size:11px; border-collapse:collapse; background:var(--bg2); border-radius:12px; overflow:hidden; }
+  .mtable th { color:var(--text3); font-weight:600; padding:8px; text-align:right; background:var(--bg3); border-bottom:1px solid var(--border); }
+  .mtable td { padding:8px; text-align:right; color:var(--text2); border-top:1px solid var(--border); }
+  .mtable td:first-child { text-align:left; color:var(--text); font-weight:600; max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .mtable tr:hover td { background:var(--bg3); }
+
+  .url-row { display:flex; gap:8px; align-items:center; margin-bottom:6px; }
+  .url-row input { flex:1; }
+  #pstat { font-size:12px; color:var(--text3); }
+  .badge { font-size:11px; padding:3px 8px; border-radius:99px; font-weight:600; }
+  .dbadge { background:rgba(91,143,255,.15); color:#82a8ff; }
+
+  @media(max-width:720px){
+    .sgrid{grid-template-columns:1fr 1fr;}
+    .stop-row,.col-hdr{grid-template-columns:24px 1fr 52px 1fr 28px;}
+  }
+
+  /* ── Glowing shadow button (adapted from glowing-shadow React component) ── */
+  @property --hue          { syntax:"<number>"; inherits:true; initial-value:0; }
+  @property --rotate       { syntax:"<number>"; inherits:true; initial-value:0; }
+  @property --bg-y         { syntax:"<number>"; inherits:true; initial-value:0; }
+  @property --bg-x         { syntax:"<number>"; inherits:true; initial-value:0; }
+  @property --glow-translate-y { syntax:"<number>"; inherits:true; initial-value:0; }
+  @property --bg-size      { syntax:"<number>"; inherits:true; initial-value:0; }
+  @property --glow-opacity { syntax:"<number>"; inherits:true; initial-value:0; }
+  @property --glow-blur    { syntax:"<number>"; inherits:true; initial-value:0; }
+  @property --glow-scale   { syntax:"<number>"; inherits:true; initial-value:2; }
+  @property --glow-radius  { syntax:"<number>"; inherits:true; initial-value:2; }
+  @property --white-shadow { syntax:"<number>"; inherits:true; initial-value:0; }
+
+  /* Wrapper that contains the glow effect */
+  .glow-btn-wrap {
+    --card-radius: 10px;
+    --border-width: 2px;
+    --bg-size: 1;
+    --hue: 220;
+    --hue-speed: 0.6;
+    --rotate: 0;
+    --animation-speed: 4s;
+    --interaction-speed: 0.45s;
+    --glow-scale: 0.4;
+    --scale-factor: 1;
+    --glow-blur: 1.5;
+    --glow-opacity: 0.5;
+    --glow-radius: 100;
+    --glow-rotate-unit: 1deg;
+    position: relative;
+    display: block;
+    width: 100%;
+    border-radius: var(--card-radius);
+    z-index: 0;
+  }
+
+  /* The rotating glow orb behind the button */
+  .glow-btn-wrap .glow-orb {
+    display: block;
+    position: absolute;
+    width: 20px;
+    height: 20px;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) rotateZ(calc(var(--rotate) * var(--glow-rotate-unit)));
+    transform-origin: center;
+    border-radius: calc(var(--glow-radius) * 10vw);
+    animation: glow-rotate var(--animation-speed) linear infinite;
+    pointer-events: none;
+    z-index: -1;
+  }
+  .glow-btn-wrap .glow-orb:after {
+    content: "";
+    display: block;
+    position: absolute;
+    width: 140%;
+    height: 140%;
+    left: -20%;
+    top: -20%;
+    background: hsl(calc(var(--hue) * var(--hue-speed) * 1deg) 100% 60%);
+    border-radius: calc(var(--glow-radius) * 10vw);
+    filter: blur(calc(var(--glow-blur) * 8px));
+    animation: glow-hue var(--animation-speed) linear infinite;
+    transform: scaleY(calc(var(--glow-scale) * var(--scale-factor) / 1.1))
+               scaleX(calc(var(--glow-scale) * var(--scale-factor) * 1.2))
+               translateY(calc(var(--glow-translate-y) * 1%));
+    opacity: var(--glow-opacity);
+  }
+
+  /* The actual button inside the wrapper */
+  .glow-btn-wrap .btn-inner {
+    position: relative;
+    z-index: 2;
+    width: 100%;
+    height: 44px;
+    border: none;
+    border-radius: var(--card-radius);
+    background: linear-gradient(135deg, hsl(220deg 70% 42%), hsl(210deg 70% 34%));
+    color: #fff;
+    font-size: 14px;
+    font-family: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: all var(--interaction-speed) ease;
+  }
+
+  /* Border glow effect — the animated hue gradient behind the button */
+  .glow-btn-wrap:before {
+    content: "";
+    display: block;
+    position: absolute;
+    inset: calc(var(--border-width) * -1);
+    border-radius: calc(var(--card-radius) + var(--border-width));
+    z-index: -1;
+    background: hsl(0deg 0% 16%) radial-gradient(
+      60% 80% at calc(var(--bg-x) * 1%) calc(var(--bg-y) * 1%),
+      hsl(calc(var(--hue) * var(--hue-speed) * 1deg) 100% 85%) calc(0% * var(--bg-size)),
+      hsl(calc(var(--hue) * var(--hue-speed) * 1deg) 100% 65%) calc(30% * var(--bg-size)),
+      transparent 100%
+    );
+    animation: glow-hue var(--animation-speed) linear infinite,
+               glow-rotate-bg var(--animation-speed) linear infinite;
+    transition: --bg-size var(--interaction-speed) ease;
+  }
+
+  /* Hover state — intensify the glow */
+  .glow-btn-wrap:hover:before { --bg-size: 3; }
+  .glow-btn-wrap:hover .glow-orb {
+    --glow-blur: 0.8;
+    --glow-opacity: 0.35;
+    --glow-scale: 0.6;
+    --glow-radius: 100;
+    --rotate: 900;
+    --glow-rotate-unit: 0;
+    --scale-factor: 1;
+    animation-play-state: paused;
+  }
+  .glow-btn-wrap:hover .btn-inner {
+    background: linear-gradient(135deg, hsl(220deg 75% 52%), hsl(210deg 75% 44%));
+    box-shadow: 0 0 16px rgba(91,143,255,0.35);
+  }
+  .glow-btn-wrap:active .btn-inner { transform: scale(0.98); }
+
+  /* Subtler version for secondary primary buttons (Test connection, Add stop) */
+  .glow-btn-sm {
+    --animation-speed: 5s;
+    --hue: 220;
+    --hue-speed: 0.5;
+    --glow-blur: 1;
+    --glow-opacity: 0.3;
+    --glow-scale: 0.3;
+    --bg-size: 0.3;
+  }
+  .glow-btn-sm:before { opacity: 0.4; }
+  .glow-btn-sm .btn-inner {
+    height: 36px;
+    font-size: 13px;
+    background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+  }
+
+  @keyframes glow-rotate {
+    from { --rotate: -70; --glow-translate-y: -55; }
+    to   { --rotate: calc(360 - 70); --glow-translate-y: -55; }
+  }
+  @keyframes glow-hue {
+    0%   { --hue: 220; }
+    33%  { --hue: 210; }
+    66%  { --hue: 230; }
+    100% { --hue: 220; }
+  }
+  @keyframes glow-rotate-bg {
+    0%   { --bg-x: 0;   --bg-y: 0;   }
+    25%  { --bg-x: 100; --bg-y: 0;   }
+    50%  { --bg-x: 100; --bg-y: 100; }
+    75%  { --bg-x: 0;   --bg-y: 100; }
+    100% { --bg-x: 0;   --bg-y: 0;   }
+  }
+
+
+  /* Leaflet popup dark theme */
+  .leaflet-popup-content-wrapper {
+    background: hsl(220deg 35% 14%) !important;
+    color: hsl(260deg 10% 88%) !important;
+    border: 1px solid rgba(140,120,255,.25) !important;
+    border-radius: 10px !important;
+    box-shadow: 0 8px 32px rgba(0,0,0,.6) !important;
+  }
+  .leaflet-popup-tip { background: hsl(220deg 35% 14%) !important; }
+  .leaflet-popup-close-button { color: hsl(260deg 10% 55%) !important; }
+  .leaflet-control-zoom a {
+    background: hsl(260deg 60% 7%) !important;
+    color: hsl(260deg 10% 75%) !important;
+    border-color: rgba(140,120,255,.25) !important;
+  }
+  .leaflet-control-attribution {
+    background: rgba(0,0,0,.5) !important;
+    color: hsl(260deg 10% 50%) !important;
+  }
+  .leaflet-control-attribution a { color: hsl(260deg 10% 65%) !important; }
+
+  /* #map container dark */
+  #map { background: hsl(220deg 35% 10%); }
+
+  /* Stop section separator line dark */
+  .stop-section-line { background: var(--border); }
+
+  /* fc-num dark */
+  .fc-num { color: var(--primary); }
+
+  /* lbl section headers use animated hue */
+  .lbl { animation: page-hue-shift 8s linear infinite; }
+
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="brand-wrap">
+    <div class="brand-card">
+      <div class="brand-logo">
+        <img src="logo.png" alt="The Cary Company" onerror="this.style.display='none'" />
+      </div>
+      <h1>VRP Route Optimizer</h1>
+      <p class="subtitle">Deliveries · Pickups · Priority stops · Truck type restrictions · OSRM real roads · OR-Tools</p>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <div class="tab on" onclick="st('config')">Configuration</div>
+    <div class="tab"    onclick="st('fleet')">Fleet</div>
+    <div class="tab"    onclick="st('results')">Results</div>
+    <div class="tab"    onclick="st('map')">Map</div>
+    <div class="tab"    onclick="st('matrix')">Matrices</div>
+  </div>
+
+  <!-- ══════════ CONFIG ══════════ -->
+  <div class="pane on" id="pane-config">
+
+    <p class="lbl">Backend</p>
+    <div class="card" style="margin-bottom:12px;">
+      <div class="url-row">
+        <input type="text" id="burl" value="http://localhost:5000" />
+        <div class="glow-btn-wrap glow-btn-sm" style="width:auto;flex-shrink:0;">
+        <span class="glow-orb"></span>
+        <button class="btn-inner" onclick="ping()" id="pbtn" style="padding:0 16px;width:auto;">
+          <i class="ti ti-wifi"></i> Test connection
+        </button>
+      </div>
+      </div>
+      <div id="pstat">Not tested — make sure Flask is running.</div>
+    </div>
+
+    <p class="lbl">Depot</p>
+    <div class="card" style="margin-bottom:12px;">
+      <div style="display:flex;gap:8px;align-items:center;">
+        <div class="snum" style="width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;background:#e8eefb;border:1px solid #bfd0f5;color:#15326f;flex-shrink:0;">D</div>
+        <input type="text" id="depot" value="Addison, IL" style="flex:1;"
+          oninput="DC=null;sb('gbdepot','not geocoded','gpend')" />
+        <span id="gbdepot" class="gbadge gpend">not geocoded</span>
+        <span class="badge dbadge">depot</span>
+      </div>
+    </div>
+
+    <p class="lbl">Stops</p>
+    <div class="card">
+      <!-- Column headers -->
+      <div class="col-hdr">
+        <span></span>
+        <span>Location name / address</span>
+        <span>Pallets</span>
+        <span>Zone type</span>
+        <span>Priority</span>
+        <span>Geo</span>
+        <span></span>
+      </div>
+
+      <!-- Deliveries -->
+      <div class="stop-section-hd" style="margin-top:6px;">
+        <span class="stop-section-pill pill-delivery"><i class="ti ti-arrow-down-circle" style="font-size:11px;vertical-align:-1px;"></i> Delivery stops</span>
+        <div class="stop-section-line"></div>
+        <span style="font-size:11px;color:var(--text3);">drops off first</span>
+      </div>
+      <div id="del-container"></div>
+      <div class="glow-btn-wrap glow-btn-sm" style="margin-top:8px;--hue:220;--hue-speed:0.4;">
+        <span class="glow-orb"></span>
+        <button class="btn-inner" onclick="addDel()" style="background:linear-gradient(135deg,hsl(220deg 70% 40%),hsl(210deg 70% 32%));">
+          <i class="ti ti-plus"></i> Add delivery stop
+        </button>
+      </div>
+
+      <div style="height:1px;background:var(--border);margin:14px 0 8px;"></div>
+
+      <!-- Pickups -->
+      <div class="stop-section-hd">
+        <span class="stop-section-pill pill-pickup"><i class="ti ti-arrow-up-circle" style="font-size:11px;vertical-align:-1px;"></i> Pickup stops</span>
+        <div class="stop-section-line"></div>
+        <span style="font-size:11px;color:var(--text3);">runs after deliveries</span>
+      </div>
+      <div id="pick-container"></div>
+      <div class="glow-btn-wrap glow-btn-sm" style="margin-top:8px;--hue:150;--hue-speed:0.4;">
+        <span class="glow-orb"></span>
+        <button class="btn-inner" onclick="addPick()" style="background:linear-gradient(135deg,hsl(130deg 55% 28%),hsl(150deg 55% 22%));">
+          <i class="ti ti-plus"></i> Add pickup stop
+        </button>
+      </div>
+    </div>
+
+    <p class="lbl">Service times</p>
+    <div class="card">
+      <div style="display:flex;gap:14px;flex-wrap:wrap;">
+        <div style="flex:1;min-width:160px;">
+          <label style="font-size:12px;color:var(--text2);font-weight:500;display:block;margin-bottom:4px;">Delivery service time (min)</label>
+          <input type="number" id="del-svc" value="20" min="0" />
+        </div>
+        <div style="flex:1;min-width:160px;">
+          <label style="font-size:12px;color:var(--text2);font-weight:500;display:block;margin-bottom:4px;">Pickup service time (min) — loading takes longer</label>
+          <input type="number" id="pick-svc" value="45" min="0" />
+        </div>
+      </div>
+    </div>
+
+    <div id="serr" style="display:none;" class="ebox"></div>
+    <div class="glow-btn-wrap" id="sbtnouter">
+      <span class="glow-orb"></span>
+      <button class="btn-inner" id="sbtn" onclick="solve()">
+        <i class="ti ti-route"></i> Optimize routes
+      </button>
+    </div>
+
+  </div>
+
+  <!-- ══════════ FLEET ══════════ -->
+  <div class="pane" id="pane-fleet">
+
+    <p class="lbl">Fleet — all trucks are identical · trailer type sets capacity &amp; zone access</p>
+    <div class="card" style="margin-bottom:12px;">
+      <div id="fleet-counts"></div>
+    </div>
+
+    <p class="lbl">Zone type reference</p>
+    <div class="card" style="margin-bottom:12px;">
+      <div class="zone-legend-grid">
+        <div class="zone-legend-item">
+          <span class="zone-pill z-commercial" style="flex-shrink:0;">commercial</span>
+          <span style="font-size:12px;color:var(--text2);">Offices, warehouses, retail — most trucks allowed</span>
+        </div>
+        <div class="zone-legend-item">
+          <span class="zone-pill z-residential" style="flex-shrink:0;">residential</span>
+          <span style="font-size:12px;color:var(--text2);">Homes, apartments — weight limits apply</span>
+        </div>
+        <div class="zone-legend-item">
+          <span class="zone-pill z-industrial" style="flex-shrink:0;">industrial</span>
+          <span style="font-size:12px;color:var(--text2);">Plants, loading docks, heavy facilities</span>
+        </div>
+        <div class="zone-legend-item">
+          <span class="zone-pill z-airport" style="flex-shrink:0;">airport</span>
+          <span style="font-size:12px;color:var(--text2);">Cargo terminals — restricted access, standard/small only</span>
+        </div>
+      </div>
+    </div>
+
+    <p class="lbl">Trailer type details</p>
+    <div class="card">
+      <div id="type-ref"></div>
+    </div>
+
+  </div>
+
+  <!-- ══════════ RESULTS ══════════ -->
+  <div class="pane" id="pane-results">
+    <div id="rc"><p style="color:var(--text3);font-size:13px;">Run the optimizer to see results.</p></div>
+  </div>
+
+  <!-- ══════════ MAP ══════════ -->
+  <div class="pane" id="pane-map">
+    <div id="map-placeholder" style="color:var(--text3);font-size:13px;padding:1rem 0;">Run the optimizer to see the route map.</div>
+    <div id="map-status-wrap" style="display:none;margin-bottom:6px;"></div>
+    <div class="map-key" id="map-key" style="display:none;">
+      <div class="map-key-item"><div style="width:11px;height:11px;border-radius:50%;background:#1f3f8f;flex-shrink:0;"></div><span>Depot</span></div>
+      <div class="map-key-item"><div style="width:11px;height:11px;border-radius:50%;background:var(--delivery);flex-shrink:0;"></div><span>Delivery</span></div>
+      <div class="map-key-item"><div style="width:11px;height:11px;border-radius:50%;background:var(--pickup);flex-shrink:0;"></div><span>Pickup</span></div>
+    </div>
+    <div id="map" style="display:none;"></div>
+    <div class="legend" id="map-legend" style="display:none;"></div>
+  </div>
+
+  <!-- ══════════ MATRICES ══════════ -->
+  <div class="pane" id="pane-matrix">
+    <div id="mc"><p style="color:var(--text3);font-size:13px;">Run the optimizer to see distance and time matrices.</p></div>
+  </div>
+
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// ── Constants ──────────────────────────────────────────────────────
+const TRUCK_COLORS=['#1f3f8f','#0e7c4a','#c47a00','#a0280f','#5b3aa8','#0891b2'];
+
+// All trucks are identical — trailer determines pallet capacity and zone access
+const TRAILER_DEFS={
+  "53ft":{   icon:'🚛', name:"53' Dry Van",       capacity:26, color:'#1f3f8f',
+    allowed:['commercial','residential','industrial','airport'],
+    desc:"26 pallets — no zone restrictions"},
+  liftgate:{ icon:'🏗️', name:'Liftgate Trailer',  capacity:12, color:'#0e7c4a',
+    allowed:['commercial','residential','industrial','airport'],
+    desc:'12 pallets — access anywhere, required for stops with no loading dock'},
+  hazmat:{   icon:'⚠️', name:'Hazmat Liftgate',   capacity:12, color:'#a0280f',
+    allowed:['industrial'],
+    desc:'12 pallets — industrial zones only'},
+};
+// Alias for any remaining references
+const TRUCK_DEFS = TRAILER_DEFS;
+
+// ── State ──────────────────────────────────────────────────────────
+let DEL=[
+  {name:"O'Hare Airport, Chicago, IL", demand:10, zone:'airport',    priority:2, coords:null},
+  {name:"Willis Tower, Chicago, IL",   demand:8,  zone:'commercial', priority:1, coords:null},
+];
+let PICK=[
+  {name:"Navy Pier, Chicago, IL", demand:6,  zone:'commercial', priority:1, coords:null},
+  {name:"Schaumburg, IL",         demand:12, zone:'industrial',  priority:1, coords:null},
+];
+// Fleet: all trucks are the same, only trailer type varies
+let FLEET={"53ft":3,liftgate:0,hazmat:0};
+let DC=null;
+const GC={};
+let leafletMap=null, mapLayers=[];
+
+// ── Utilities ──────────────────────────────────────────────────────
+function sb(id,txt,cls){const e=document.getElementById(id);if(e){e.textContent=txt;e.className='gbadge '+cls;}}
+function base(){return document.getElementById('burl').value.replace(/\/$/,'');}
+function ft(m){const t=480+m,h=Math.floor(t/60),mm=t%60;return `${h}:${mm.toString().padStart(2,'0')}`;}
+function esc(s){return (s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;');}
+
+function st(t){
+  document.querySelectorAll('.tab').forEach(e=>e.classList.remove('on'));
+  document.querySelectorAll('.pane').forEach(e=>e.classList.remove('on'));
+  const idx={config:0,fleet:1,results:2,map:3,matrix:4}[t];
+  document.querySelectorAll('.tab')[idx].classList.add('on');
+  document.getElementById('pane-'+t).classList.add('on');
+  if(t==='map'&&leafletMap) setTimeout(()=>leafletMap.invalidateSize(),60);
+}
+
+async function geo(q){
+  if(GC[q])return GC[q];
+  const r=await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1`,
+    {headers:{'Accept-Language':'en','User-Agent':'CaryVRP/1.0'}});
+  const d=await r.json();
+  if(!d.length)return null;
+  const v=[parseFloat(d[0].lat),parseFloat(d[0].lon)];
+  GC[q]=v; return v;
+}
+
+async function getRoadGeometry(orderedCoords){
+  const s=orderedCoords.map(([lat,lon])=>`${lon},${lat}`).join(';');
+  try{
+    const r=await fetch(`https://router.project-osrm.org/route/v1/driving/${s}?overview=full&geometries=geojson`);
+    const d=await r.json();
+    if(d.code!=='Ok'||!d.routes||!d.routes[0])return null;
+    return d.routes[0].geometry.coordinates.map(([lon,lat])=>[lat,lon]);
+  }catch{return null;}
+}
+
+function buildFleet(){
+  const f=[];let n=1;
+  Object.entries(FLEET).forEach(([trailer,count])=>{
+    for(let i=0;i<count;i++) f.push({trailer, id:`Truck-${n++}`});
+  });
+  return f;
+}
+
+function zoneOpts(sel){
+  return ['commercial','residential','industrial','airport'].map(z=>
+    `<option value="${z}"${sel===z?' selected':''}>${z[0].toUpperCase()+z.slice(1)}</option>`
+  ).join('');
+}
+function prioOpts(sel){
+  return [[1,'Normal'],[2,'High ⚡'],[3,'Urgent 🔴']].map(([v,l])=>
+    `<option value="${v}"${sel===v?' selected':''}>${v} — ${l}</option>`
+  ).join('');
+}
+
+// ── Stop rendering ─────────────────────────────────────────────────
+function renderDel(){
+  const c=document.getElementById('del-container'); c.innerHTML='';
+  DEL.forEach((s,i)=>{
+    const row=document.createElement('div');
+    row.className='stop-row';
+    row.innerHTML=`
+      <div class="snum snum-d">${i+1}</div>
+      <input type="text" value="${esc(s.name)}" placeholder="Address or place name, City, State"
+        oninput="DEL[${i}].name=this.value;DEL[${i}].coords=null;sb('gbd${i}','not geocoded','gpend')" />
+      <input type="number" value="${s.demand}" min="0" style="text-align:center;"
+        max="26" oninput="DEL[${i}].demand=parseInt(this.value)||0" />
+      <select onchange="DEL[${i}].zone=this.value">${zoneOpts(s.zone)}</select>
+      <select onchange="DEL[${i}].priority=parseInt(this.value)">${prioOpts(s.priority)}</select>
+      <span id="gbd${i}" class="gbadge ${s.coords?'gok':'gpend'}">${s.coords?'✓ ok':'pending'}</span>
+      <button class="btn btn-d" onclick="DEL.splice(${i},1);renderDel()"><i class="ti ti-x" style="font-size:13px;"></i></button>`;
+    c.appendChild(row);
+  });
+}
+
+function renderPick(){
+  const c=document.getElementById('pick-container'); c.innerHTML='';
+  PICK.forEach((s,i)=>{
+    const row=document.createElement('div');
+    row.className='stop-row';
+    row.innerHTML=`
+      <div class="snum snum-p">${i+1}</div>
+      <input type="text" value="${esc(s.name)}" placeholder="Address or place name, City, State"
+        oninput="PICK[${i}].name=this.value;PICK[${i}].coords=null;sb('gbp${i}','not geocoded','gpend')" />
+      <input type="number" value="${s.demand}" min="0" style="text-align:center;"
+        max="26" oninput="PICK[${i}].demand=parseInt(this.value)||0" />
+      <select onchange="PICK[${i}].zone=this.value">${zoneOpts(s.zone)}</select>
+      <select onchange="PICK[${i}].priority=parseInt(this.value)">${prioOpts(s.priority)}</select>
+      <span id="gbp${i}" class="gbadge ${s.coords?'gok':'gpend'}">${s.coords?'✓ ok':'pending'}</span>
+      <button class="btn btn-d" onclick="PICK.splice(${i},1);renderPick()"><i class="ti ti-x" style="font-size:13px;"></i></button>`;
+    c.appendChild(row);
+  });
+}
+
+function addDel(){DEL.push({name:'',demand:40,zone:'commercial',priority:1,coords:null});renderDel();}
+function addPick(){PICK.push({name:'',demand:30,zone:'commercial',priority:1,coords:null});renderPick();}
+
+// ── Fleet rendering ────────────────────────────────────────────────
+function renderFleetCounts(){
+  const c=document.getElementById('fleet-counts'); c.innerHTML='';
+  Object.entries(TRAILER_DEFS).forEach(([key,def])=>{
+    const row=document.createElement('div');
+    row.className='fleet-count-row';
+    row.innerHTML=`
+      <div class="fc-icon">${def.icon}</div>
+      <div class="fc-label">
+        <div class="fc-name" style="color:${def.color}">${def.name}
+          <span style="font-size:11px;font-weight:400;color:var(--text3);margin-left:6px;">cap ${def.capacity} pallets</span>
+        </div>
+        <div class="fc-desc">${def.desc}</div>
+        <div class="fc-zones">
+          ${def.allowed.map(z=>`<span class="zone-pill z-${z}">${z}</span>`).join('')}
+          ${['commercial','residential','industrial','airport'].filter(z=>!def.allowed.includes(z))
+            .map(z=>`<span style="font-size:10px;padding:2px 7px;border-radius:99px;font-weight:600;background:#f1f5f9;color:#cbd5e1;text-decoration:line-through;">${z}</span>`).join('')}
+        </div>
+      </div>
+      <div class="fc-controls">
+        <button class="fc-btn" onclick="adjF('${key}',-1)">−</button>
+        <div class="fc-num" id="fcn-${key}">${FLEET[key]}</div>
+        <button class="fc-btn" onclick="adjF('${key}',1)">+</button>
+      </div>`;
+    c.appendChild(row);
+  });
+}
+
+function renderTypeRef(){
+  const c=document.getElementById('type-ref'); c.innerHTML='';
+  Object.entries(TRAILER_DEFS).forEach(([key,def])=>{
+    const row=document.createElement('div');
+    row.className='type-ref-row';
+    row.innerHTML=`
+      <div style="font-size:24px;flex-shrink:0;">${def.icon}</div>
+      <div style="flex:1;">
+        <div style="font-size:13px;font-weight:700;color:${def.color};margin-bottom:3px;">${def.name}</div>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:6px;">${def.desc}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:4px;">
+          ${def.allowed.map(z=>`<span class="zone-pill z-${z}">✓ ${z}</span>`).join('')}
+          ${['commercial','residential','industrial','airport'].filter(z=>!def.allowed.includes(z))
+            .map(z=>`<span style="font-size:10px;padding:2px 7px;border-radius:99px;font-weight:600;background:#fef2f2;color:#fca5a5;">✕ ${z}</span>`).join('')}
+        </div>
+      </div>
+      <div style="font-size:22px;font-weight:800;color:${def.color};flex-shrink:0;align-self:center;">${def.capacity}<div style="font-size:10px;font-weight:400;color:var(--text3);text-align:center;">units</div></div>`;
+    c.appendChild(row);
+  });
+}
+
+function adjF(key,d){
+  FLEET[key]=Math.max(0,FLEET[key]+d);
+  document.getElementById(`fcn-${key}`).textContent=FLEET[key];
+}
+
+// ── Ping ───────────────────────────────────────────────────────────
+async function ping(){
+  const btn=document.getElementById('pbtn'),ps=document.getElementById('pstat');
+  btn.disabled=true;btn.innerHTML='<span class="spin" style="border-color:#ccc;border-top-color:#333;"></span> Testing…';
+  try{
+    const r=await fetch(base()+'/solve');
+    ps.style.color=r.ok?'#27500a':'#791f1f';
+    ps.textContent=r.ok?'✓ Connected — Flask is reachable.':`Server returned HTTP ${r.status}.`;
+  }catch{ps.style.color='#791f1f';ps.textContent='Cannot reach server. Run: python app.py';}
+  finally{btn.innerHTML='<i class="ti ti-wifi"></i> Test connection';btn.disabled=false;}
+}
+function setBtn(msg){document.getElementById('sbtn').innerHTML=`<span class="spin"></span> <span style="font-size:12px;opacity:.9;">${msg}</span>`;}
+
+// ── Solve ──────────────────────────────────────────────────────────
+async function solve(){
+  const btn=document.getElementById('sbtn'),err=document.getElementById('serr');
+  err.style.display='none'; btn.disabled=true; document.getElementById('sbtnouter').style.opacity='0.65';
+  try{
+    if(!DEL.length&&!PICK.length) throw new Error('Add at least one stop.');
+    const dn=document.getElementById('depot').value.trim();
+    if(!dn) throw new Error('Enter a depot location.');
+    const fleet=buildFleet();
+    if(!fleet.length) throw new Error('Add at least one truck in the Fleet tab.');
+
+    if(!DC){
+      setBtn('Geocoding depot…'); sb('gbdepot','looking up…','gpend');
+      const c=await geo(dn);
+      if(!c){sb('gbdepot','not found','gfail');throw new Error(`Could not find: "${dn}"`);}
+      DC=c; sb('gbdepot','✓ located','gok');
+    }
+    for(let i=0;i<DEL.length;i++){
+      if(!DEL[i].name.trim()) throw new Error(`Delivery ${i+1} has no name.`);
+      if(!DEL[i].coords){
+        setBtn(`Geocoding delivery ${i+1}/${DEL.length}…`); sb(`gbd${i}`,'looking up…','gpend');
+        const c=await geo(DEL[i].name);
+        if(!c){sb(`gbd${i}`,'not found','gfail');throw new Error(`Not found: "${DEL[i].name}"`);}
+        DEL[i].coords=c; sb(`gbd${i}`,'✓ ok','gok');
+      }
+    }
+    for(let i=0;i<PICK.length;i++){
+      if(!PICK[i].name.trim()) throw new Error(`Pickup ${i+1} has no name.`);
+      if(!PICK[i].coords){
+        setBtn(`Geocoding pickup ${i+1}/${PICK.length}…`); sb(`gbp${i}`,'looking up…','gpend');
+        const c=await geo(PICK[i].name);
+        if(!c){sb(`gbp${i}`,'not found','gfail');throw new Error(`Not found: "${PICK[i].name}"`);}
+        PICK[i].coords=c; sb(`gbp${i}`,'✓ ok','gok');
+      }
+    }
+
+    setBtn('Running OR-Tools…');
+    const payload={
+      depot:dn, depot_coords:DC,
+      deliveries:DEL.map(s=>({name:s.name,demand:s.demand,coords:s.coords,zone:s.zone,priority:s.priority})),
+      pickups:   PICK.map(s=>({name:s.name,demand:s.demand,coords:s.coords,zone:s.zone,priority:s.priority})),
+      fleet,
+      delivery_service_time:parseInt(document.getElementById('del-svc').value)||20,
+      pickup_service_time:  parseInt(document.getElementById('pick-svc').value)||45,
+    };
+
+    const res=await fetch(base()+'/solve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    if(!res.ok){const e=await res.json().catch(()=>({error:`HTTP ${res.status}`}));throw new Error(e.error||`HTTP ${res.status}`);}
+    const data=await res.json();
+    if(data.error) throw new Error(data.error);
+
+    const allCoords=[DC,...DEL.map(s=>s.coords),...PICK.map(s=>s.coords)];
+    const active=data.routes.filter(r=>r.stops&&r.stops.length>2);
+
+    setBtn('Fetching road geometry…');
+    const geometries=[];
+    for(let i=0;i<active.length;i++){
+      geometries.push(await getRoadGeometry(active[i].stops.map(s=>allCoords[s.node])));
+    }
+
+    renderResults(data);
+    renderMatrix(data);
+    renderMap(data,allCoords,active,geometries);
+    st('results');
+
+  }catch(e){
+    err.textContent='Error: '+e.message; err.style.display='block';
+  }finally{
+    btn.disabled=false; document.getElementById('sbtnouter').style.opacity='1'; btn.innerHTML='<i class="ti ti-route"></i> Optimize routes';
+  }
+}
+
+// ── Results ────────────────────────────────────────────────────────
+function renderResults(data){
+  const locs=data.locations;
+  const active=data.routes.filter(r=>r.stops&&r.stops.length>2);
+  const totD=active.reduce((s,r)=>s+r.stops.filter(x=>x.type==='delivery').length,0);
+  const totP=active.reduce((s,r)=>s+r.stops.filter(x=>x.type==='pickup').length,0);
+
+  let h=`<div class="sgrid">
+    <div class="metric"><div class="mval">${Number(data.total_distance_miles).toFixed(1)} mi</div><div class="mlbl">Total distance</div></div>
+    <div class="metric"><div class="mval">${active.length}</div><div class="mlbl">Trucks used</div></div>
+    <div class="metric"><div class="mval">${totD}</div><div class="mlbl">Deliveries</div></div>
+    <div class="metric"><div class="mval">${totP}</div><div class="mlbl">Pickups</div></div>
+  </div>`;
+
+  active.forEach((r,vi)=>{
+    const tc=TRUCK_COLORS[vi%TRUCK_COLORS.length];
+    const def=TRAILER_DEFS[r.trailer_type]||TRAILER_DEFS["53ft"];
+    const ret=r.stops[r.stops.length-1];
+    const nD=r.stops.filter(x=>x.type==='delivery').length;
+    const nP=r.stops.filter(x=>x.type==='pickup').length;
+
+    h+=`<div class="rcard">
+      <div class="rhead" style="background:${tc}0d;">
+        <div style="width:36px;height:36px;border-radius:10px;background:${tc}22;color:${tc};display:flex;align-items:center;justify-content:center;font-size:20px;">🚛</div>
+        <div style="flex:1;">
+          <div style="font-weight:700;font-size:14px;color:${tc};">${r.truck}
+            <span style="font-size:11px;padding:2px 8px;border-radius:99px;background:${tc}18;color:${tc};font-weight:600;margin-left:6px;">${def.icon} ${def.name}</span>
+          </div>
+          <div style="font-size:12px;color:var(--text2);margin-top:3px;">
+            <span title="Truck leaves depot carrying this much delivery cargo">🚛 departs with <b>${r.departure_load}</b> pallets</span> &nbsp;·&nbsp;
+            <span title="Returns to depot carrying pickup cargo">🏭 returns with <b>${r.pickup_load}</b> pallets</span> &nbsp;·&nbsp;
+            cap <b>${r.capacity}</b> pallets &nbsp;·&nbsp; back by ${ft(ret.arrival_min)}
+          </div>
+          <div style="font-size:11px;color:var(--text3);margin-top:2px;">
+            <span style="color:var(--delivery);font-weight:600;">${nD} delivery${nD!==1?'s':''}</span> &nbsp;·&nbsp;
+            <span style="color:var(--pickup);font-weight:600;">${nP} pickup${nP!==1?'s':''}</span>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:5px;">
+            ${def.allowed.map(z=>`<span class="zone-pill z-${z}">${z}</span>`).join('')}
+          </div>
+        </div>
+        <button class="btn" onclick="st('map')" style="font-size:12px;height:28px;padding:0 10px;color:${tc};border-color:${tc}44;">
+          <i class="ti ti-map-pin"></i> Map
+        </button>
+      </div>
+      <div class="rstops">`;
+
+    r.stops.forEach((step,si)=>{
+      const isD=step.type==='depot',isDel=step.type==='delivery',isPick=step.type==='pickup';
+      const isL=si===r.stops.length-1;
+      const dc=isD?'#1f3f8f':isDel?'var(--delivery)':'var(--pickup)';
+      const zonePill=step.zone&&step.zone!=='depot'?`<span class="zone-pill z-${step.zone}">${step.zone}</span>`:'';
+      const prioPill=step.priority>1?`<span class="prio-pill p${step.priority}">${step.priority===2?'High ⚡':'Urgent 🔴'}</span>`:'';
+
+      h+=`<div class="rstop">
+        <div style="display:flex;flex-direction:column;align-items:center;flex-shrink:0;width:12px;">
+          <div class="dot" style="border-color:${dc};background:${isD?dc:'transparent'};"></div>
+          ${!isL?'<div class="vl"></div>':''}
+        </div>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:13px;font-weight:${isD?700:500};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${step.name||locs[step.node]}</div>
+          <div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:4px;align-items:center;">
+            ${isD?`<span class="type-pill tp-dep">${si===0?'Depart':'Return'}</span>`:''}
+            ${isDel?`<span class="type-pill tp-d"><i class="ti ti-arrow-down-circle" style="font-size:9px;vertical-align:-1px;"></i> delivery · ${step.demand} pallets</span>`:''}
+            ${isPick?`<span class="type-pill tp-p"><i class="ti ti-arrow-up-circle" style="font-size:9px;vertical-align:-1px;"></i> pickup · ${Math.abs(step.demand||0)} pallets</span>`:''}
+            ${zonePill}${prioPill}
+            ${step.service_min>0?`<span style="font-size:10px;color:var(--text3);">🔧 ${step.service_min} min</span>`:''}
+          </div>
+        </div>
+        <div style="font-size:13px;color:var(--text3);font-variant-numeric:tabular-nums;flex-shrink:0;padding-top:2px;">${ft(step.arrival_min)}</div>
+      </div>`;
+    });
+    h+=`</div></div>`;
+  });
+
+  document.getElementById('rc').innerHTML=h;
+}
+
+// ── Map ────────────────────────────────────────────────────────────
+function renderMap(data,allCoords,active,geometries){
+  const locs=data.locations;
+  const anyReal=geometries.some(g=>g&&g.length>2);
+
+  document.getElementById('map-placeholder').style.display='none';
+  document.getElementById('map').style.display='block';
+  document.getElementById('map-key').style.display='flex';
+
+  const sw=document.getElementById('map-status-wrap');
+  sw.style.display='block';
+  sw.innerHTML=anyReal
+    ?`<span class="map-status ms-real"><i class="ti ti-road" style="font-size:12px;"></i> Real road routes via OSRM</span>`
+    :`<span class="map-status ms-fall"><i class="ti ti-alert-triangle" style="font-size:12px;"></i> Straight lines — OSRM unavailable</span>`;
+
+  mapLayers.forEach(l=>{try{l.remove();}catch{}});
+  mapLayers=[];
+
+  if(!leafletMap){
+    leafletMap=L.map('map');
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+      {attribution:'© <a href="https://openstreetmap.org">OpenStreetMap</a> © <a href="https://carto.com">CARTO</a>',maxZoom:19}).addTo(leafletMap);
+  }
+
+  const allBounds=[];
+  active.forEach((r,i)=>{
+    const tc=TRUCK_COLORS[i%TRUCK_COLORS.length];
+    const pts=(geometries[i]&&geometries[i].length>1)?geometries[i]:r.stops.map(s=>allCoords[s.node]);
+    allBounds.push(...pts.map(p=>L.latLng(p[0],p[1])));
+    mapLayers.push(L.polyline(pts,{color:'#fff',weight:7,opacity:.5,lineJoin:'round',lineCap:'round'}).addTo(leafletMap));
+    mapLayers.push(L.polyline(pts,{color:tc,weight:4,opacity:.9,lineJoin:'round',lineCap:'round'}).addTo(leafletMap));
+
+    r.stops.forEach((step,si)=>{
+      if(si===r.stops.length-1&&step.node===0)return;
+      const coord=allCoords[step.node];
+      const isD=step.type==='depot',isDel=step.type==='delivery',isPick=step.type==='pickup';
+      const bg=isD?'#1f3f8f':isDel?'#1f3f8f':'#0e7c4a';
+      const label=isD?'D':isDel?`D${si}`:`P${si}`;
+      const sz=isD?34:28;
+      const def=TRAILER_DEFS[r.trailer_type]||TRAILER_DEFS["53ft"];
+      const icon=L.divIcon({
+        className:'',
+        html:`<div style="width:${sz}px;height:${sz}px;background:${bg};color:#fff;border:3px solid #fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:${isD?12:10}px;font-weight:700;font-family:-apple-system,sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.25);">${label}</div>`,
+        iconSize:[sz,sz],iconAnchor:[sz/2,sz/2],popupAnchor:[0,-(sz/2+5)],
+      });
+      const zoneLine=step.zone&&step.zone!=='depot'?`<div style="font-size:11px;margin-top:3px;"><span style="background:${bg}18;color:${bg};padding:1px 7px;border-radius:99px;font-weight:600;">${step.zone}</span></div>`:'';
+      const prioLine=step.priority>1?`<div style="font-size:11px;color:#c47a00;font-weight:600;margin-top:2px;">${step.priority===2?'⚡ High priority':'🔴 Urgent'}</div>`:'';
+      const demandLine=isDel?`<div style="font-size:11px;color:#555;margin-top:2px;">Drops off: ${step.demand} pallets</div>`
+                      :isPick?`<div style="font-size:11px;color:#555;margin-top:2px;">Picks up: ${Math.abs(step.demand||0)} pallets</div>`:'';
+      const popup=`<div style="font-family:-apple-system,sans-serif;min-width:175px;padding:2px 0;background:hsl(220deg 35% 14%);color:hsl(220deg 20% 90%);border-radius:8px;">
+        <div style="font-weight:700;font-size:13px;margin-bottom:4px;">${step.name||locs[step.node]}</div>
+        <div style="font-size:11px;color:#5f6675;margin-bottom:3px;">${def.icon} ${r.truck} · ${step.type}</div>
+        <div style="font-size:12px;color:${bg};font-weight:600;">Arrive: ${ft(step.arrival_min)}</div>
+        ${demandLine}${zoneLine}${prioLine}
+      </div>`;
+      mapLayers.push(L.marker(coord,{icon}).bindPopup(popup,{maxWidth:230}).addTo(leafletMap));
+    });
+  });
+
+  if(allBounds.length) leafletMap.fitBounds(L.latLngBounds(allBounds),{padding:[44,44]});
+
+  const leg=document.getElementById('map-legend');
+  leg.style.display='flex';
+  let lh=`<div class="leg-item"><div style="width:11px;height:11px;border-radius:50%;background:#1f3f8f;"></div><span>Depot</span></div>`;
+  active.forEach((r,i)=>{
+    const def=TRAILER_DEFS[r.trailer_type]||TRAILER_DEFS["53ft"];
+    lh+=`<div class="leg-item"><div class="leg-line" style="background:${TRUCK_COLORS[i%TRUCK_COLORS.length]};"></div><span>🚛 ${r.truck} · ${def.name}</span></div>`;
+  });
+  leg.innerHTML=lh;
+}
+
+// ── Matrix ─────────────────────────────────────────────────────────
+function renderMatrix(data){
+  const names=data.locations;
+  const short=names.map(n=>n.length>14?n.slice(0,14)+'…':n);
+  const mk=(M,unit)=>{
+    let t=`<div style="overflow-x:auto;margin-bottom:1.5rem;"><table class="mtable"><tr><th></th>`;
+    short.forEach(n=>{t+=`<th>${n}</th>`;});t+='</tr>';
+    M.forEach((row,i)=>{
+      t+=`<tr><td>${short[i]}</td>`;
+      row.forEach((v,j)=>{const s=i===j;t+=`<td style="${s?'color:#bbb;':''}">${s?'—':unit==='mi'?Number(v).toFixed(3):Number(v).toFixed(1)}</td>`;});
+      t+='</tr>';
+    });
+    return t+`</table></div>`;
+  };
+  document.getElementById('mc').innerHTML=
+    `<p class="lbl" style="margin-bottom:8px;">Distance (miles) — OSRM real roads</p>${mk(data.distances,'mi')}`+
+    `<p class="lbl" style="margin-bottom:8px;">Travel time (min) — OSRM real roads</p>${mk(data.times,'min')}`;
+}
+
+// ── Init ───────────────────────────────────────────────────────────
+renderDel();
+renderPick();
+renderFleetCounts();
+renderTypeRef();
+</script>
+</body>
+</html>
