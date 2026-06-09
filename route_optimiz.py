@@ -751,9 +751,10 @@ def geometry():
 
 if __name__ == '__main__':
     os.makedirs('static', exist_ok=True)
+    os.makedirs('logs', exist_ok=True)
+    port = int(os.environ.get("PORT", 5000))
+    debug = os.environ.get("FLASK_ENV") == "development"
     log.info("=" * 60)
-    log.info("VRP Route Optimizer starting")
-    log.info("Audit log: logs/vrp_audit.log")
-    log.info("Frontend:  http://localhost:5000")
+    log.info("VRP Route Optimizer starting on port %d", port)
     log.info("=" * 60)
-    app.run(debug=True, port=5000)
+    app.run(host="0.0.0.0", port=port, debug=debug)
