@@ -21,55 +21,35 @@
     --shadow-sm: 0 4px 10px rgba(0,0,0,.04);
     --shadow-md: 0 10px 28px rgba(17,24,39,.08);
   }
-  @property --bg-hue1 { syntax:"<number>"; inherits:false; initial-value:220; }
-  @property --bg-hue2 { syntax:"<number>"; inherits:false; initial-value:200; }
-  @property --bg-hue3 { syntax:"<number>"; inherits:false; initial-value:185; }
-
+  #shader-bg {
+    position:fixed; top:0; left:0;
+    width:100%; height:100%;
+    z-index:0; pointer-events:none;
+  }
   body {
     font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    background:#dde8f5;
     color:var(--text);
     min-height:100vh;
-    overflow-x:hidden;
-    background:
-      radial-gradient(ellipse 75% 55% at 15% 12%,
-        hsl(calc(var(--bg-hue1)*1deg) 70% 94%) 0%,
-        transparent 60%),
-      radial-gradient(ellipse 60% 45% at 88% 82%,
-        hsl(calc(var(--bg-hue2)*1deg) 65% 93%) 0%,
-        transparent 55%),
-      radial-gradient(ellipse 50% 40% at 58% 42%,
-        hsl(calc(var(--bg-hue3)*1deg) 60% 95%) 0%,
-        transparent 50%),
-      #eef2f7;
-    animation: bg-breathe 12s ease-in-out infinite alternate;
   }
-
-  @keyframes bg-breathe {
-    0%   { --bg-hue1: 220; --bg-hue2: 200; --bg-hue3: 185; }
-    25%  { --bg-hue1: 215; --bg-hue2: 210; --bg-hue3: 195; }
-    50%  { --bg-hue1: 228; --bg-hue2: 192; --bg-hue3: 178; }
-    75%  { --bg-hue1: 212; --bg-hue2: 218; --bg-hue3: 190; }
-    100% { --bg-hue1: 224; --bg-hue2: 204; --bg-hue3: 188; }
-  }
-
   .page { max-width:960px; margin:0 auto; padding:2rem 1rem 3rem; position:relative; z-index:1; }
 
   .brand-wrap { margin-bottom:1.4rem; }
-  .brand-card { background:var(--bg); border:1px solid var(--border); border-radius:20px; box-shadow:var(--shadow-md); padding:1.2rem 1.2rem 1rem; text-align:center; overflow:hidden; }
+  .brand-card { background:rgba(255,255,255,0.88); border:1px solid var(--border); border-radius:20px; box-shadow:var(--shadow-md); padding:1.2rem 1.2rem 1rem; text-align:center; overflow:hidden; backdrop-filter:blur(12px); }
   .brand-card::after { content:""; display:block; width:100%; height:5px; background:linear-gradient(90deg,var(--primary),var(--accent)); border-radius:999px; margin-top:1rem; }
   .brand-logo { display:flex; justify-content:center; margin-bottom:.9rem; }
   .brand-logo img { max-width:360px; width:100%; height:auto; }
   h1 { font-size:24px; font-weight:700; color:var(--primary-dark); margin-bottom:6px; letter-spacing:-.02em; }
   .subtitle { font-size:13px; color:var(--text3); }
 
-  .tabs { display:flex; gap:4px; margin-bottom:1.2rem; background:rgba(255,255,255,.7); padding:6px; border-radius:14px; border:1px solid var(--border); box-shadow:var(--shadow-sm); backdrop-filter:blur(6px); }
+  .tabs { display:flex; gap:4px; margin-bottom:1.2rem; background:rgba(255,255,255,.65); padding:6px; border-radius:14px; border:1px solid var(--border); box-shadow:var(--shadow-sm); backdrop-filter:blur(12px); }
   .tab { flex:1; padding:10px 14px; font-size:13px; cursor:pointer; color:var(--text2); border-radius:10px; text-align:center; user-select:none; transition:all .2s; font-weight:500; }
   .tab.on { color:#fff; font-weight:700; background:linear-gradient(135deg,var(--primary),var(--primary-dark)); box-shadow:0 8px 18px rgba(31,63,143,.16); }
   .tab:hover:not(.on) { color:var(--primary-dark); background:#f4f7fc; }
   .pane { display:none; } .pane.on { display:block; }
 
   .lbl { font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--primary); margin-bottom:10px; }
-  .card { background:var(--bg); border:1px solid var(--border); border-radius:var(--radius-lg); padding:1rem 1.25rem; margin-bottom:1rem; box-shadow:var(--shadow-sm); }
+  .card { background:rgba(255,255,255,0.86); border:1px solid var(--border); border-radius:var(--radius-lg); padding:1rem 1.25rem; margin-bottom:1rem; box-shadow:var(--shadow-sm); backdrop-filter:blur(10px); }
 
   input[type=text],input[type=number],select {
     height:36px; padding:0 10px; border-radius:var(--radius); border:1px solid var(--border2);
@@ -147,10 +127,10 @@
 
   /* Results */
   .sgrid { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:1rem; }
-  .metric { background:linear-gradient(180deg,#fff 0%,#f8faff 100%); border-radius:var(--radius-lg); padding:14px; border:1px solid var(--border); box-shadow:var(--shadow-sm); }
+  .metric { background:rgba(255,255,255,0.86); border-radius:var(--radius-lg); padding:14px; border:1px solid var(--border); box-shadow:var(--shadow-sm); backdrop-filter:blur(8px); }
   .mval { font-size:24px; font-weight:700; color:var(--primary-dark); }
   .mlbl { font-size:11px; color:var(--text3); margin-top:4px; text-transform:uppercase; letter-spacing:.05em; }
-  .rcard { border:1px solid var(--border); border-radius:var(--radius-lg); margin-bottom:12px; overflow:hidden; background:var(--bg); box-shadow:var(--shadow-sm); }
+  .rcard { border:1px solid var(--border); border-radius:var(--radius-lg); margin-bottom:12px; overflow:hidden; background:rgba(255,255,255,0.86); box-shadow:var(--shadow-sm); backdrop-filter:blur(8px); }
   .rhead { display:flex; align-items:center; gap:10px; padding:12px 14px; border-bottom:1px solid var(--border); }
   .rstops { padding:0 14px; }
   .rstop { display:flex; align-items:flex-start; gap:10px; padding:9px 0; border-bottom:1px solid var(--border); }
@@ -190,15 +170,157 @@
     .sgrid{grid-template-columns:1fr 1fr;}
     .stop-row,.col-hdr{grid-template-columns:24px 1fr 52px 1fr 28px;}
   }
+
+  /* ── Glowing shadow button ──────────────────────────────────── */
+  @property --hue          { syntax:"<number>"; inherits:true; initial-value:0; }
+  @property --rotate       { syntax:"<number>"; inherits:true; initial-value:0; }
+  @property --bg-y         { syntax:"<number>"; inherits:true; initial-value:0; }
+  @property --bg-x         { syntax:"<number>"; inherits:true; initial-value:0; }
+  @property --glow-translate-y { syntax:"<number>"; inherits:true; initial-value:0; }
+  @property --bg-size      { syntax:"<number>"; inherits:true; initial-value:0; }
+  @property --glow-opacity { syntax:"<number>"; inherits:true; initial-value:0; }
+  @property --glow-blur    { syntax:"<number>"; inherits:true; initial-value:0; }
+  @property --glow-scale   { syntax:"<number>"; inherits:true; initial-value:2; }
+  @property --glow-radius  { syntax:"<number>"; inherits:true; initial-value:2; }
+  @property --white-shadow { syntax:"<number>"; inherits:true; initial-value:0; }
+
+  /* Wrapper */
+  .glow-wrap {
+    --card-radius: 10px;
+    --border-width: 2px;
+    --bg-size: 0.5;
+    --hue: 220;
+    --hue-speed: 0.5;
+    --rotate: 0;
+    --animation-speed: 4s;
+    --interaction-speed: 0.45s;
+    --glow-scale: 0.35;
+    --scale-factor: 1;
+    --glow-blur: 1.2;
+    --glow-opacity: 0.4;
+    --glow-radius: 100;
+    --glow-rotate-unit: 1deg;
+    position: relative;
+    display: block;
+    width: 100%;
+    border-radius: var(--card-radius);
+    z-index: 0;
+  }
+
+  /* Orb */
+  .glow-wrap .glow-orb {
+    display: block;
+    position: absolute;
+    width: 18px; height: 18px;
+    top: 50%; left: 50%;
+    transform: translate(-50%,-50%) rotateZ(calc(var(--rotate)*var(--glow-rotate-unit)));
+    transform-origin: center;
+    border-radius: calc(var(--glow-radius)*10vw);
+    animation: gbtn-rotate var(--animation-speed) linear infinite;
+    pointer-events: none;
+    z-index: -1;
+  }
+  .glow-wrap .glow-orb:after {
+    content:"";
+    display:block;
+    position:absolute;
+    width:140%; height:140%;
+    left:-20%; top:-20%;
+    background: hsl(calc(var(--hue)*var(--hue-speed)*1deg) 80% 55%);
+    border-radius: calc(var(--glow-radius)*10vw);
+    filter: blur(calc(var(--glow-blur)*8px));
+    animation: gbtn-hue var(--animation-speed) linear infinite;
+    transform: scaleY(calc(var(--glow-scale)*var(--scale-factor)/1.1))
+               scaleX(calc(var(--glow-scale)*var(--scale-factor)*1.2))
+               translateY(calc(var(--glow-translate-y)*1%));
+    opacity: var(--glow-opacity);
+  }
+
+  /* Inner button */
+  .glow-wrap .glow-inner {
+    position: relative;
+    z-index: 2;
+    width: 100%;
+    border: none;
+    border-radius: var(--card-radius);
+    background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+    color: #fff;
+    font-family: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: all var(--interaction-speed) ease;
+  }
+
+  /* Animated border before pseudo-element */
+  .glow-wrap:before {
+    content:"";
+    display:block;
+    position:absolute;
+    inset: calc(var(--border-width)*-1);
+    border-radius: calc(var(--card-radius) + var(--border-width));
+    z-index:-1;
+    background: hsl(0deg 0% 94%) radial-gradient(
+      60% 80% at calc(var(--bg-x)*1%) calc(var(--bg-y)*1%),
+      hsl(calc(var(--hue)*var(--hue-speed)*1deg) 90% 75%) calc(0%*var(--bg-size)),
+      hsl(calc(var(--hue)*var(--hue-speed)*1deg) 80% 60%) calc(30%*var(--bg-size)),
+      transparent 100%
+    );
+    animation: gbtn-hue var(--animation-speed) linear infinite,
+               gbtn-rotate-bg var(--animation-speed) linear infinite;
+    transition: --bg-size var(--interaction-speed) ease;
+  }
+
+  /* Hover */
+  .glow-wrap:hover:before { --bg-size: 4; }
+  .glow-wrap:hover .glow-orb {
+    --glow-blur: 0.6; --glow-opacity: 0.3; --glow-scale: 0.5;
+    --rotate: 900; --glow-rotate-unit: 0;
+    animation-play-state: paused;
+  }
+  .glow-wrap:hover .glow-inner {
+    background: linear-gradient(135deg, #2a52b5, #1a3a7f);
+    box-shadow: 0 0 14px rgba(31,63,143,0.3);
+  }
+  .glow-wrap:active .glow-inner { transform: scale(0.98); }
+
+  /* Size variants */
+  .glow-wrap.glow-lg .glow-inner  { height:44px; font-size:14px; }
+  .glow-wrap.glow-md .glow-inner  { height:36px; font-size:13px; padding:0 16px; }
+  .glow-wrap.glow-green .glow-inner { background:linear-gradient(135deg,#0e7c4a,#0a5c37); }
+  .glow-wrap.glow-green:before { background: hsl(0deg 0% 94%) radial-gradient(
+    60% 80% at calc(var(--bg-x)*1%) calc(var(--bg-y)*1%),
+    hsl(140deg 70% 65%) calc(0%*var(--bg-size)),
+    hsl(150deg 60% 50%) calc(30%*var(--bg-size)),
+    transparent 100%); }
+  .glow-wrap.glow-green { --hue:150; --hue-speed:0.4; }
+
+  @keyframes gbtn-rotate {
+    from { --rotate:-70; --glow-translate-y:-55; }
+    to   { --rotate:calc(360 - 70); --glow-translate-y:-55; }
+  }
+  @keyframes gbtn-hue {
+    0%  { --hue:210; } 33% { --hue:230; } 66% { --hue:200; } 100% { --hue:210; }
+  }
+  @keyframes gbtn-rotate-bg {
+    0%  { --bg-x:0;   --bg-y:0;   } 25% { --bg-x:100; --bg-y:0;   }
+    50% { --bg-x:100; --bg-y:100; } 75% { --bg-x:0;   --bg-y:100; }
+    100%{ --bg-x:0;   --bg-y:0;   }
+  }
+
 </style>
 </head>
 <body>
+<canvas id="shader-bg"></canvas>
 <div class="page">
 
   <div class="brand-wrap">
     <div class="brand-card">
       <div class="brand-logo">
-        <img src="logo.png" alt="The Cary Company" onerror="this.style.display='none'" />
+        <img src="https://www.carycompany.com/media/logo/stores/1/cary-company-logo.png" alt="The Cary Company" onerror="this.style.display='none'" style="max-height:60px;width:auto;" />
       </div>
       <h1>VRP Route Optimizer</h1>
       <p class="subtitle">Deliveries · Pickups · Priority stops · Truck type restrictions · OSRM real roads · OR-Tools</p>
@@ -219,8 +341,13 @@
     <p class="lbl">Backend</p>
     <div class="card" style="margin-bottom:12px;">
       <div class="url-row">
-        <input type="text" id="burl" value="https://web-production-b02aa.up.railway.app" />
-        <button class="btn" onclick="ping()" id="pbtn"><i class="ti ti-wifi"></i> Test connection</button>
+        <input type="text" id="burl" value="http://localhost:5000" />
+        <div class="glow-wrap glow-md" style="width:auto;flex-shrink:0;">
+          <span class="glow-orb"></span>
+          <button class="glow-inner" onclick="ping()" id="pbtn" style="width:auto;padding:0 14px;">
+            <i class="ti ti-wifi"></i> Test connection
+          </button>
+        </div>
       </div>
       <div id="pstat">Not tested — make sure Flask is running.</div>
     </div>
@@ -256,9 +383,12 @@
         <span style="font-size:11px;color:var(--text3);">drops off first</span>
       </div>
       <div id="del-container"></div>
-      <button class="btn" onclick="addDel()" style="margin-top:8px;width:100%;justify-content:center;border-color:var(--delivery-border);color:var(--delivery);">
-        <i class="ti ti-plus"></i> Add delivery stop
-      </button>
+      <div class="glow-wrap glow-md" style="margin-top:8px;">
+        <span class="glow-orb"></span>
+        <button class="glow-inner" onclick="addDel()">
+          <i class="ti ti-plus"></i> Add delivery stop
+        </button>
+      </div>
 
       <div style="height:1px;background:var(--border);margin:14px 0 8px;"></div>
 
@@ -269,9 +399,12 @@
         <span style="font-size:11px;color:var(--text3);">runs after deliveries</span>
       </div>
       <div id="pick-container"></div>
-      <button class="btn" onclick="addPick()" style="margin-top:8px;width:100%;justify-content:center;border-color:var(--pickup-border);color:var(--pickup);">
-        <i class="ti ti-plus"></i> Add pickup stop
-      </button>
+      <div class="glow-wrap glow-md glow-green" style="margin-top:8px;">
+        <span class="glow-orb"></span>
+        <button class="glow-inner" onclick="addPick()">
+          <i class="ti ti-plus"></i> Add pickup stop
+        </button>
+      </div>
     </div>
 
     <p class="lbl">Service times</p>
@@ -289,9 +422,12 @@
     </div>
 
     <div id="serr" style="display:none;" class="ebox"></div>
-    <button class="btn btn-p" id="sbtn" onclick="solve()" style="width:100%;justify-content:center;height:44px;font-size:14px;">
-      <i class="ti ti-route"></i> Optimize routes
-    </button>
+    <div class="glow-wrap glow-lg" id="sbtnouter">
+      <span class="glow-orb"></span>
+      <button class="glow-inner" id="sbtn" onclick="solve()">
+        <i class="ti ti-route"></i> Optimize routes
+      </button>
+    </div>
 
   </div>
 
@@ -557,7 +693,7 @@ function setBtn(msg){document.getElementById('sbtn').innerHTML=`<span class="spi
 // ── Solve ──────────────────────────────────────────────────────────
 async function solve(){
   const btn=document.getElementById('sbtn'),err=document.getElementById('serr');
-  err.style.display='none'; btn.disabled=true;
+  err.style.display='none'; btn.disabled=true; document.getElementById('sbtnouter').style.opacity='0.65';
   try{
     if(!DEL.length&&!PICK.length) throw new Error('Add at least one stop.');
     const dn=document.getElementById('depot').value.trim();
@@ -622,7 +758,7 @@ async function solve(){
   }catch(e){
     err.textContent='Error: '+e.message; err.style.display='block';
   }finally{
-    btn.disabled=false; btn.innerHTML='<i class="ti ti-route"></i> Optimize routes';
+    btn.disabled=false; document.getElementById('sbtnouter').style.opacity='1'; btn.innerHTML='<i class="ti ti-route"></i> Optimize routes';
   }
 }
 
@@ -799,6 +935,122 @@ renderDel();
 renderPick();
 renderFleetCounts();
 renderTypeRef();
+</script>
+
+<script>
+(function(){
+  const canvas = document.getElementById('shader-bg');
+  const gl = canvas.getContext('webgl');
+  if(!gl){ canvas.style.background='linear-gradient(135deg,#dde8f5,#c8dcf0)'; return; }
+
+  const vert = `attribute vec4 p; void main(){ gl_Position=p; }`;
+
+  // Color-matched to site: blues #1f3f8f / #b8d800 accent
+  // bgColor1/2: light blue-white  lineColor: site navy blue  speed: slow/subtle
+  const frag = `
+    precision highp float;
+    uniform vec2 iResolution;
+    uniform float iTime;
+
+    const float overallSpeed   = 0.07;
+    const float scale          = 5.0;
+    const vec4  lineColor      = vec4(0.12, 0.25, 0.56, 1.0);
+    const float minLineWidth   = 0.006;
+    const float maxLineWidth   = 0.10;
+    const float lineSpeed      = 1.0 * overallSpeed;
+    const float lineAmplitude  = 0.55;
+    const float lineFrequency  = 0.2;
+    const float warpSpeed      = 0.2 * overallSpeed;
+    const float warpFrequency  = 0.5;
+    const float warpAmplitude  = 1.0;
+    const float offsetFrequency= 0.5;
+    const float offsetSpeed    = 1.33 * overallSpeed;
+    const float minOffsetSpread= 0.6;
+    const float maxOffsetSpread= 2.0;
+    const int   linesPerGroup  = 10;
+
+    #define circle(pos,r,co) smoothstep(r+0.015,r,length(co-(pos)))
+    #define smoothL(pos,hw,t) smoothstep(hw,0.0,abs(pos-(t)))
+    #define crispL(pos,hw,t)  smoothstep(hw+0.015,hw,abs(pos-(t)))
+
+    float rnd(float t){
+      return (cos(t)+cos(t*1.3+1.3)+cos(t*1.4+1.4))/3.0;
+    }
+    float plasmaY(float x,float hf,float off){
+      return rnd(x*lineFrequency+iTime*lineSpeed)*hf*lineAmplitude+off;
+    }
+
+    void main(){
+      vec2 uv    = gl_FragCoord.xy/iResolution.xy;
+      vec2 space = (gl_FragCoord.xy-iResolution.xy*0.5)/iResolution.x*2.0*scale;
+      float hf   = 1.0-(cos(uv.x*6.2832)*0.5+0.5);
+      float vf   = 1.0-(cos(uv.y*6.2832)*0.5+0.5);
+
+      space.y += rnd(space.x*warpFrequency+iTime*warpSpeed)*warpAmplitude*(0.5+hf);
+      space.x += rnd(space.y*warpFrequency+iTime*warpSpeed+2.0)*warpAmplitude*hf;
+
+      // Site background colors — light airy blues
+      vec4 bg = mix(vec4(0.87,0.92,0.97,1.0), vec4(0.82,0.89,0.96,1.0), uv.x);
+      bg *= vf; bg.a = 1.0;
+
+      vec4 lines = vec4(0.0);
+      for(int l=0;l<linesPerGroup;l++){
+        float nli   = float(l)/float(linesPerGroup);
+        float offT  = iTime*offsetSpeed;
+        float offP  = float(l)+space.x*offsetFrequency;
+        float rand  = rnd(offP+offT)*0.5+0.5;
+        float hw    = mix(minLineWidth,maxLineWidth,rand*hf)/2.0;
+        float off   = rnd(offP+offT*(1.0+nli))*mix(minOffsetSpread,maxOffsetSpread,hf);
+        float lp    = plasmaY(space.x,hf,off);
+        float line  = smoothL(lp,hw,space.y)/2.0 + crispL(lp,hw*0.15,space.y);
+        float cx    = mod(float(l)+iTime*lineSpeed,25.0)-12.0;
+        line       += circle(vec2(cx,plasmaY(cx,hf,off)),0.01,space)*4.0;
+        lines      += line*lineColor*rand*0.28;
+      }
+
+      gl_FragColor = bg + lines;
+    }
+  `;
+
+  function mkShader(type, src){
+    const s=gl.createShader(type);
+    gl.shaderSource(s,src); gl.compileShader(s);
+    if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)){ console.warn(gl.getShaderInfoLog(s)); return null; }
+    return s;
+  }
+  const prog=gl.createProgram();
+  gl.attachShader(prog,mkShader(gl.VERTEX_SHADER,vert));
+  gl.attachShader(prog,mkShader(gl.FRAGMENT_SHADER,frag));
+  gl.linkProgram(prog);
+
+  const buf=gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER,buf);
+  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,1,1]),gl.STATIC_DRAW);
+
+  const aPos =gl.getAttribLocation(prog,'p');
+  const uRes =gl.getUniformLocation(prog,'iResolution');
+  const uTime=gl.getUniformLocation(prog,'iTime');
+
+  function resize(){
+    canvas.width=window.innerWidth; canvas.height=window.innerHeight;
+    gl.viewport(0,0,canvas.width,canvas.height);
+  }
+  window.addEventListener('resize',resize); resize();
+
+  const t0=Date.now();
+  (function frame(){
+    const t=(Date.now()-t0)/1000;
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.useProgram(prog);
+    gl.uniform2f(uRes,canvas.width,canvas.height);
+    gl.uniform1f(uTime,t);
+    gl.bindBuffer(gl.ARRAY_BUFFER,buf);
+    gl.vertexAttribPointer(aPos,2,gl.FLOAT,false,0,0);
+    gl.enableVertexAttribArray(aPos);
+    gl.drawArrays(gl.TRIANGLE_STRIP,0,4);
+    requestAnimationFrame(frame);
+  })();
+})();
 </script>
 </body>
 </html>
