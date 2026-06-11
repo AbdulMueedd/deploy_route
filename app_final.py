@@ -3,7 +3,8 @@ VRP Route Optimizer — Flask Backend
 The Cary Company
 
 Solves a Vehicle Routing Problem (VRP) with:
-  - Pickup and delivery stops (deliveries run first, then pickups)
+  - Pickup and delivery stops (ALL deliveries on a truck finish before ANY pickup on that truck)
+  - Per-stop time windows (e.g. "Company A only accepts deliveries 12pm-1pm")
   - Trailer-based capacity constraints (each trailer type has its own capacity and zone access)
   - Priority stops (high/urgent stops are penalized if visited late)
   - Zone restrictions (trailer type determines which zones it can access)
@@ -11,6 +12,14 @@ Solves a Vehicle Routing Problem (VRP) with:
   - OR-Tools for route optimization
 
 Units: distances in miles, time in minutes, cargo measured in pallets.
+
+TIME MODEL
+──────────
+All times are minutes from the start of the working day (t=0 means 8:00 AM).
+So a window of "12pm-1pm" becomes (240, 300):
+    12:00 PM = 4 hours after 8:00 AM = 240 minutes
+    1:00 PM  = 5 hours after 8:00 AM = 300 minutes
+The frontend converts clock times to these minute offsets before sending.
 """
 
 import logging
@@ -31,8 +40,6 @@ app = Flask(__name__, static_folder='static')
 CORS(app)
 
 # ── Logging setup ──────────────────────────────────────────────────────────────
-# Writes audit logs to both the console and a rotating log file.
-# Every request, solve attempt, OSRM call, and error is recorded with a timestamp.
 
 os.makedirs('logs', exist_ok=True)
 
@@ -41,8 +48,8 @@ logging.basicConfig(
     format='%(asctime)s | %(levelname)-8s | %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S',
     handlers=[
-        logging.StreamHandler(),                                    # console
-        logging.FileHandler('logs/vrp_audit.log', encoding='utf-8'),  # file
+        logging.StreamHandler(),
+        logging.FileHandler('logs/vrp_audit.log', encoding='utf-8'),
     ]
 )
 log = logging.getLogger('vrp')
@@ -61,22 +68,15 @@ def after_request(response):
 
 KM_TO_MILES = 0.621371  # conversion factor applied to all OSRM distances
 
-# Trailer type definitions.
-# The truck itself is always the same — the trailer determines:
-#   capacity:      max cargo units the trailer can hold at any one time
-#   allowed_zones: which delivery zone types this trailer is permitted to enter
-#   description:   human-readable explanation shown in the UI
-#   capacity:      maximum pallets the trailer can hold at any one time
-#
-# Pallet capacities based on Cary Company fleet specs:
-#   53-foot dry van  → 26 pallets (standard double-stack floor configuration)
-#   Liftgate trailer → 12 pallets (liftgate mechanism reduces usable floor space)
-#   Hazmat trailer   → 12 pallets (liftgate-style, restricted to industrial zones only)
+DAY_START_MIN = 0     # t=0 corresponds to 8:00 AM (see DAY_START_CLOCK)
+DAY_END_MIN   = 600   # 600 minutes = 10 hour working day, ends 6:00 PM
+DAY_START_CLOCK = 480 # 8:00 AM in minutes-from-midnight, used for display only
+
 TRAILER_DEFS = {
     "53ft": {
         "capacity":      26,
         "allowed_zones": ["residential", "commercial", "industrial", "airport"],
-        "description":   "53\' dry van — 26 pallets, no zone restrictions",
+        "description":   "53' dry van — 26 pallets, no zone restrictions",
         "color":         "#1f3f8f",
     },
     "liftgate": {
@@ -96,21 +96,14 @@ TRAILER_DEFS = {
 
 # ── OSRM helpers ───────────────────────────────────────────────────────────────
 
-def get_matrices_from_osrm(locs: list[tuple[float, float]]) -> tuple[list, list]:
+def get_matrices_from_osrm(locs):
     """
     Calls the OSRM public routing API to get real road-following distances and
     travel times between every pair of locations.
 
-    OSRM expects coordinates as longitude,latitude (note: lon first).
-    It returns a full N×N matrix where matrix[i][j] is the cost of going
-    from location i to location j.
-
     Returns:
-        dist_matrix: N×N list of floats, distances in MILES (converted from metres)
-        time_matrix: N×N list of floats, travel times in MINUTES (converted from seconds)
-
-    Raises:
-        Exception if OSRM returns a non-OK status code (e.g. bad coordinates).
+        dist_matrix: N×N list, distances in MILES (rounded to 1 decimal)
+        time_matrix: N×N list, travel times in MINUTES (rounded to nearest minute)
     """
     coords_str = ";".join(f"{lon},{lat}" for lat, lon in locs)
     url        = f"http://router.project-osrm.org/table/v1/driving/{coords_str}"
@@ -135,32 +128,20 @@ def get_matrices_from_osrm(locs: list[tuple[float, float]]) -> tuple[list, list]
     elapsed = time_module.time() - t0
     log.info("OSRM matrix received | %.2fs", elapsed)
 
-    # Convert metres → miles and seconds → minutes, keep as floats
     dist_matrix = [
-        [round((d / 1000.0) * KM_TO_MILES, 3) for d in row]
+        [round((d / 1000) * KM_TO_MILES, 1) for d in row]
         for row in data["distances"]
     ]
     time_matrix = [
-        [round(t / 60.0, 2) for t in row]
+        [round(t / 60) for t in row]
         for row in data["durations"]
     ]
 
     return dist_matrix, time_matrix
 
 
-def get_route_geometry(coords: list[tuple[float, float]]) -> list:
-    """
-    Calls OSRM's route endpoint to get a road-following polyline for a single
-    ordered sequence of coordinates (one truck's full route).
-
-    This is separate from the matrix call — the matrix gives us pairwise costs
-    for the solver, while this gives us the actual GPS path to draw on the map.
-
-    Returns:
-        List of [lat, lon] pairs representing the road-following path.
-        Returns an empty list if the request fails (map will fall back to
-        straight lines between stops).
-    """
+def get_route_geometry(coords):
+    """Calls OSRM's route endpoint to get a road-following polyline for one truck's route."""
     if len(coords) < 2:
         return []
 
@@ -178,98 +159,121 @@ def get_route_geometry(coords: list[tuple[float, float]]) -> list:
         log.warning("OSRM geometry returned no route: code=%s", data.get("code"))
         return []
 
-    # GeoJSON uses [lon, lat] order — Leaflet.js needs [lat, lon]
     return [[p[1], p[0]] for p in data["routes"][0]["geometry"]["coordinates"]]
+
+
+# ── Pre-solve feasibility checks ────────────────────────────────────────────────
+# These run BEFORE the solver so an impossible problem returns an instant, specific
+# error message rather than a 20-second "no solution found" timeout.
+
+def check_feasibility(loc_names, loc_demands, loc_windows, loc_svc, stop_zones,
+                      fleet, time_m, n_deliveries):
+    """
+    Runs a series of fast feasibility checks before the solver starts.
+    Returns a list of human-readable error strings (empty if everything is feasible).
+    """
+    errors = []
+    capacities = [TRAILER_DEFS[t["trailer"]]["capacity"] for t in fleet]
+    max_cap    = max(capacities) if capacities else 0
+    total_cap  = sum(capacities)
+
+    # 1. Total cargo vs fleet capacity (deliveries and pickups checked separately,
+    #    because the two-dimension model enforces them independently)
+    total_delivery = sum(loc_demands[i] for i in range(1, n_deliveries + 1))
+    total_pickup   = sum(loc_demands[i] for i in range(n_deliveries + 1, len(loc_demands)))
+    if total_delivery > total_cap:
+        errors.append(f"Total delivery cargo ({total_delivery} pallets) exceeds combined "
+                      f"fleet capacity ({total_cap} pallets). Add more trucks or reduce load.")
+    if total_pickup > total_cap:
+        errors.append(f"Total pickup cargo ({total_pickup} pallets) exceeds combined "
+                      f"fleet capacity ({total_cap} pallets). Add more trucks or reduce load.")
+
+    # 2. Any single stop heavier than the largest trailer
+    for i in range(1, len(loc_demands)):
+        if loc_demands[i] > max_cap:
+            errors.append(f"Stop '{loc_names[i]}' needs {int(loc_demands[i])} pallets, but the "
+                          f"largest trailer only holds {max_cap}. No single truck can serve it.")
+
+    # 3. Zone reachability — every stop needs at least one truck whose trailer allows its zone
+    for i in range(1, len(stop_zones)):
+        zone = stop_zones[i]
+        eligible = [t for t in fleet if zone in TRAILER_DEFS[t["trailer"]]["allowed_zones"]]
+        if not eligible:
+            errors.append(f"Stop '{loc_names[i]}' is in zone '{zone}', but no truck in the fleet "
+                          f"has a trailer that can access it.")
+
+    # 4. Time window reachability — can the truck physically reach the stop before its window closes?
+    for i in range(1, len(loc_windows)):
+        earliest, latest = loc_windows[i]
+        # Fastest possible arrival = straight drive from depot (ignores other stops, service time)
+        min_arrival = time_m[0][i]
+        if min_arrival > latest:
+            errors.append(f"Stop '{loc_names[i]}' closes at {fmt_clock(latest)} but the fastest "
+                          f"possible arrival from the depot is {fmt_clock(int(min_arrival))}. "
+                          f"Window is unreachable.")
+        if earliest > DAY_END_MIN:
+            errors.append(f"Stop '{loc_names[i]}' opens at {fmt_clock(earliest)}, which is after "
+                          f"the end of the working day ({fmt_clock(DAY_END_MIN)}).")
+        if earliest > latest:
+            errors.append(f"Stop '{loc_names[i]}' has an invalid window: opens at "
+                          f"{fmt_clock(earliest)} but closes at {fmt_clock(latest)}.")
+
+    return errors
+
+
+def fmt_clock(minutes_from_start):
+    """Convert minutes-from-day-start into a readable clock time like '12:30 PM'."""
+    total = DAY_START_CLOCK + minutes_from_start
+    h24   = (total // 60) % 24
+    m     = total % 60
+    suffix = "AM" if h24 < 12 else "PM"
+    h12 = h24 % 12
+    if h12 == 0:
+        h12 = 12
+    return f"{h12}:{m:02d} {suffix}"
 
 
 # ── Core solver ────────────────────────────────────────────────────────────────
 
-def run_solver(
-    loc_names:    list[str],
-    loc_coords:   list[tuple[float, float]],
-    loc_demands:  list[float],
-    fleet:        list[dict],
-    loc_svc:      list[float],
-    loc_windows:  list[tuple[int, int]],
-    n_deliveries: int,
-    stop_zones:   list[str],
-    priorities:   list[int],
-) -> tuple[dict | None, list, list]:
+def run_solver(loc_names, loc_coords, loc_demands, fleet, loc_svc, loc_windows,
+               n_deliveries, stop_zones, priorities):
     """
     Runs the OR-Tools VRP solver and returns optimized routes.
 
-    HOW THE CAPACITY MODEL WORKS
-    ─────────────────────────────
-    We use TWO separate capacity dimensions rather than one combined load dimension.
-    This correctly handles the delivery-first, pickup-second workflow:
+    CAPACITY MODEL — two independent dimensions
+    ───────────────────────────────────────────
+    DeliveryLoad: sum of delivery cargo on a route ≤ trailer capacity.
+    PickupLoad:   sum of pickup cargo on a route   ≤ trailer capacity.
+    Tracked separately so the two can never be traded against each other.
 
-      DeliveryLoad dimension
-        Each delivery stop has a positive demand equal to the cargo being dropped off.
-        The cumulative sum of deliveries on a route must not exceed trailer capacity.
-        start_cumul_to_zero=True means it starts at 0 and grows as deliveries are assigned.
-        OR-Tools enforces: sum(deliveries on route) ≤ capacity.
+    TIME MODEL — per-stop windows
+    ──────────────────────────────
+    Each stop has its own [earliest, latest] arrival window in minutes from day start.
+    The solver hard-enforces these — a truck must arrive within the window, waiting
+    if it gets there early (up to the max_slack), and the assignment is infeasible
+    if it cannot arrive before the window closes.
 
-      PickupLoad dimension
-        Each pickup stop has a positive demand equal to the cargo being collected.
-        The cumulative sum of pickups on a route must not exceed trailer capacity.
-        start_cumul_to_zero=True means it starts at 0 and grows as pickups are assigned.
-        OR-Tools enforces: sum(pickups on route) ≤ capacity.
+    HARD DELIVERY-BEFORE-PICKUP ORDERING
+    ─────────────────────────────────────
+    For every (delivery d, pickup p) pair, we add a conditional constraint:
+        IF the same truck serves both d and p
+        THEN arrival_time[p] ≥ arrival_time[d] + service_time[d]
+    Applied across all pairs, this forces a truck to complete EVERY delivery on its
+    route before starting ANY pickup — even if it has spare capacity. A truck cannot
+    interleave pickups between deliveries.
 
-    Since deliveries and pickups are separated in time (deliveries always run first,
-    enforced via time window constraints), the trailer space is fully reused:
-      - Truck leaves depot loaded with delivery cargo  → at most `capacity` units
-      - Truck unloads at delivery stops                → space frees up
-      - Truck loads pickup cargo                       → at most `capacity` units
-      - Truck returns to depot with pickup cargo
-
-    HOW THE TIME MODEL WORKS
-    ─────────────────────────
-    A single Time dimension tracks when each truck arrives at each stop.
-    service time at each stop is included in the transit callback so the solver
-    accounts for unload/load time before moving to the next stop.
-
-    Pickup stops are given a time window that starts no earlier than the minimum
-    time to complete one delivery — this enforces delivery-before-pickup ordering.
-
-    HOW ZONE RESTRICTIONS WORK
-    ───────────────────────────
-    For each stop, we check if the assigned trailer's allowed_zones includes
-    that stop's zone type. If not, we call VehicleVar.RemoveValue(v) to hard-forbid
-    that truck from visiting that node.
-
-    HOW PRIORITY WORKS
-    ───────────────────
-    Priority 2 (high) and 3 (urgent) stops get a soft upper bound on their arrival time.
-    If the solver visits them later than the soft deadline, it pays a penalty proportional
-    to priority. This biases the solver toward visiting important stops early.
-
-    Args:
-        loc_names:    Location names, index 0 = depot
-        loc_coords:   (lat, lon) tuples, same order as loc_names
-        loc_demands:  Cargo units per stop (0 for depot)
-        fleet:        List of {"trailer": type, "id": str}
-        loc_svc:      Service time in minutes per stop
-        loc_windows:  (earliest, latest) arrival time in minutes from start of day
-        n_deliveries: How many stops (starting at index 1) are deliveries vs pickups
-        stop_zones:   Zone type string per location
-        priorities:   Priority level (1=normal, 2=high, 3=urgent) per location
-
-    Returns:
-        (result_dict, dist_matrix, time_matrix)
-        result_dict is None if no solution was found.
+    ZONE RESTRICTIONS — VehicleVar.RemoveValue() hard-forbids illegal truck/stop pairs.
+    PRIORITY — soft upper bound on arrival time, penalty proportional to priority.
     """
-
     log.info("Solver starting | %d locations | %d vehicles | %d deliveries | %d pickups",
              len(loc_coords), len(fleet), n_deliveries, len(loc_coords) - n_deliveries - 1)
 
     t0 = time_module.time()
 
-    # ── Fetch road matrices ────────────────────────────────────────
     dist_m, time_m = get_matrices_from_osrm(loc_coords)
     n_locs         = len(loc_coords)
     n_vehicles     = len(fleet)
 
-    # Validate that every trailer type in the fleet is defined
     for truck in fleet:
         if truck["trailer"] not in TRAILER_DEFS:
             raise ValueError(f"Unknown trailer type '{truck['trailer']}'. "
@@ -279,19 +283,15 @@ def run_solver(
     capacities   = [td["capacity"] for td in trailer_defs]
 
     # ── Split demands into delivery and pickup arrays ──────────────
-    # delivery_demands[i] > 0 only for delivery stops (indices 1..n_deliveries)
-    # pickup_demands[i]   > 0 only for pickup stops   (indices n_deliveries+1..)
-    delivery_demands = [0.0] * n_locs
-    pickup_demands   = [0.0] * n_locs
+    delivery_demands = [0] * n_locs
+    pickup_demands   = [0] * n_locs
     for i in range(1, n_locs):
         if i <= n_deliveries:
-            delivery_demands[i] = float(loc_demands[i])
+            delivery_demands[i] = int(loc_demands[i])
         else:
-            pickup_demands[i]   = float(loc_demands[i])
+            pickup_demands[i]   = int(loc_demands[i])
 
-    # ── Build zone allowance map per vehicle ───────────────────────
-    # allowed_stops[v] = set of node indices that vehicle v is permitted to visit.
-    # The depot (index 0) is always allowed for all vehicles.
+    # ── Zone allowance map per vehicle ─────────────────────────────
     allowed_stops = []
     for v, td in enumerate(trailer_defs):
         allowed = {
@@ -299,23 +299,15 @@ def run_solver(
             if n == 0 or zone == "depot" or zone in td["allowed_zones"]
         }
         allowed_stops.append(allowed)
-        log.debug("Truck %s (%s) | allowed stops: %s", fleet[v]["id"], fleet[v]["trailer"],
-                  [loc_names[n] for n in sorted(allowed) if n > 0])
 
-    # ── Initialize OR-Tools routing model ─────────────────────────
-    # RoutingIndexManager maps between node indices (our location indices)
-    # and internal OR-Tools indices used by the solver.
-    # Args: (num_locations, num_vehicles, depot_index)
+    # ── Routing model ──────────────────────────────────────────────
     mgr = pywrapcp.RoutingIndexManager(n_locs, n_vehicles, 0)
     mdl = pywrapcp.RoutingModel(mgr)
 
-    # ── Cost callback ──────────────────────────────────────────────
-    # OR-Tools minimizes total arc cost. We use road distance in miles
-    # scaled by 1000 (OR-Tools needs integers internally) to preserve
-    # 3 decimal places of precision.
+    # ── Cost callback (distance in miles, scaled to integers) ──────
     COST_SCALE = 1000
 
-    def dist_cb(fi: int, ti: int) -> int:
+    def dist_cb(fi, ti):
         i = mgr.IndexToNode(fi)
         j = mgr.IndexToNode(ti)
         return int(dist_m[i][j] * COST_SCALE)
@@ -324,113 +316,84 @@ def run_solver(
     mdl.SetArcCostEvaluatorOfAllVehicles(dist_idx)
 
     # ── Time dimension ─────────────────────────────────────────────
-    # Tracks cumulative time elapsed at each stop, including travel + service time.
-    # max_slack=60: trucks can wait up to 60 minutes at a stop for a time window to open.
-    # horizon=600:  routes must complete within 600 minutes (10 hours) of start.
-    # start_cumul_to_zero=False: trucks don't all have to start at time 0.
-    def time_cb(fi: int, ti: int) -> int:
+    # max_slack=600 allows a truck to wait for a window to open (e.g. arrive at
+    # 11:00 for a 12:00 window and wait an hour). horizon=DAY_END_MIN caps the day.
+    def time_cb(fi, ti):
         i = mgr.IndexToNode(fi)
         j = mgr.IndexToNode(ti)
-        # Include service time at i before travelling to j
-        # Round to int — OR-Tools dimensions require integers
-        return int(round(time_m[i][j] + loc_svc[i]))
+        return int(time_m[i][j] + loc_svc[i])
 
     time_idx = mdl.RegisterTransitCallback(time_cb)
-    mdl.AddDimension(time_idx, 60, 600, False, "Time")
+    mdl.AddDimension(
+        time_idx,
+        600,           # max_slack — how long a truck may wait for a window to open
+        DAY_END_MIN,   # horizon — route must finish within the working day
+        False,         # don't force start cumul to zero (trucks may start later)
+        "Time"
+    )
     tdim = mdl.GetDimensionOrDie("Time")
 
-    # Apply arrival time windows to each location
+    # ── Per-stop time windows ──────────────────────────────────────
+    # Each stop is constrained to its own [earliest, latest] arrival window.
     for node, (earliest, latest) in enumerate(loc_windows):
-        tdim.CumulVar(mgr.NodeToIndex(node)).SetRange(earliest, latest)
+        tdim.CumulVar(mgr.NodeToIndex(node)).SetRange(int(earliest), int(latest))
 
-    # ── Delivery load dimension ────────────────────────────────────
-    # Enforces that the total delivery cargo assigned to any one truck
-    # does not exceed that truck's trailer capacity.
-    # See the docstring above for the full explanation of why this works.
-    def del_demand_cb(fi: int) -> int:
+    # ── Capacity dimensions ────────────────────────────────────────
+    def del_demand_cb(fi):
         return int(delivery_demands[mgr.IndexToNode(fi)])
 
     del_idx = mdl.RegisterUnaryTransitCallback(del_demand_cb)
-    mdl.AddDimensionWithVehicleCapacity(
-        del_idx,
-        0,           # no slack beyond the capacity ceiling
-        capacities,  # per-vehicle capacity ceiling
-        True,        # start_cumul_to_zero=True: accumulates from 0 as stops are assigned
-        "DeliveryLoad"
-    )
+    mdl.AddDimensionWithVehicleCapacity(del_idx, 0, capacities, True, "DeliveryLoad")
 
-    # ── Pickup load dimension ──────────────────────────────────────
-    # Same pattern as DeliveryLoad but for pickup cargo.
-    # Ensures pickup cargo collected on a route fits in the trailer.
-    def pick_demand_cb(fi: int) -> int:
+    def pick_demand_cb(fi):
         return int(pickup_demands[mgr.IndexToNode(fi)])
 
     pick_idx = mdl.RegisterUnaryTransitCallback(pick_demand_cb)
-    mdl.AddDimensionWithVehicleCapacity(
-        pick_idx,
-        0,
-        capacities,
-        True,        # start at 0, grows as pickups are added to route
-        "PickupLoad"
-    )
+    mdl.AddDimensionWithVehicleCapacity(pick_idx, 0, capacities, True, "PickupLoad")
 
-    # ── Delivery-before-pickup time constraint ─────────────────────
-    # Pickup stops get a time window floor equal to the earliest possible
-    # time a delivery could be completed. This prevents the solver from
-    # scheduling pickups before any deliveries have been made.
-    delivery_nodes = list(range(1, n_deliveries + 1))
-    pickup_nodes   = list(range(n_deliveries + 1, n_locs))
+    # ── HARD delivery-before-pickup ordering ───────────────────────
+    # Implemented with a "Stage" counter dimension.
+    #
+    # The Stage dimension increments by 1 every time a truck visits a pickup stop,
+    # so its cumulative value at any node = number of pickups that truck has already
+    # visited. We then force every delivery to be visited while Stage == 0 — meaning
+    # NO pickup can have happened before it.
+    #
+    # Because each vehicle accumulates its own Stage count, this is enforced
+    # per-truck automatically: every truck must complete ALL of its deliveries
+    # (Stage still 0) before it touches ANY pickup (which pushes Stage to 1+).
+    # A truck cannot interleave a pickup between deliveries even with spare capacity.
+    #
+    # This counter approach is used instead of time-based precedence constraints
+    # because it propagates cleanly through OR-Tools' search without conflicting
+    # with the Time dimension.
+    def stage_cb(fi):
+        n = mgr.IndexToNode(fi)
+        return 1 if n > n_deliveries else 0   # pickups add 1, deliveries/depot add 0
 
-    if delivery_nodes and pickup_nodes:
-        # Earliest a delivery can finish: fastest travel from depot + fastest service
-        min_delivery_done = (
-            min(time_m[0][d] for d in delivery_nodes) +
-            min(loc_svc[d]   for d in delivery_nodes)
-        )
-        for pn in pickup_nodes:
-            idx = mgr.NodeToIndex(pn)
-            earliest, latest = loc_windows[pn]
-            tdim.CumulVar(idx).SetRange(max(earliest, int(min_delivery_done)), latest)
+    stage_idx = mdl.RegisterUnaryTransitCallback(stage_cb)
+    mdl.AddDimension(stage_idx, 0, n_locs, True, "Stage")
+    stage = mdl.GetDimensionOrDie("Stage")
 
-        log.debug("Delivery-before-pickup: earliest pickup allowed at t=%.1f min", min_delivery_done)
+    # Every delivery must be served before any pickup → Stage cumul must be 0 there
+    for d in range(1, n_deliveries + 1):
+        stage.CumulVar(mgr.NodeToIndex(d)).SetValue(0)
 
     # ── Priority soft time bounds ──────────────────────────────────
-    # High/urgent priority stops get a soft deadline: if the solver arrives
-    # after (window_start + 60 min), it pays a penalty per minute late.
-    # This doesn't hard-forbid late arrivals — it just makes them expensive,
-    # so the solver schedules priority stops earlier when possible.
     for node, priority in enumerate(priorities):
         if priority > 1 and node > 0:
             idx           = mgr.NodeToIndex(node)
-            soft_deadline = loc_windows[node][0] + 60  # 60 min grace period
-            penalty       = priority * 500              # higher priority = steeper penalty
-            tdim.SetCumulVarSoftUpperBound(idx, soft_deadline, penalty)
-            log.debug("Priority %d on '%s': soft deadline at t=%d, penalty=%d",
-                      priority, loc_names[node], soft_deadline, penalty)
+            soft_deadline = loc_windows[node][0] + 60
+            penalty       = priority * 500
+            tdim.SetCumulVarSoftUpperBound(idx, int(soft_deadline), penalty)
 
     # ── Zone restrictions ──────────────────────────────────────────
-    # Hard-forbid each vehicle from visiting stops in zones it cannot access.
-    # VehicleVar(node).RemoveValue(v) tells OR-Tools that vehicle v can never
-    # be assigned to serve node — the solver will never consider this assignment.
     for node in range(1, n_locs):
         for v in range(n_vehicles):
             if node not in allowed_stops[v]:
                 mdl.VehicleVar(mgr.NodeToIndex(node)).RemoveValue(v)
 
-    # ── All stops are mandatory ────────────────────────────────────
-    # We do NOT add disjunctions (optional stops with skip penalties).
-    # Every stop must be served. If the problem is infeasible (e.g. not enough
-    # trucks), the solver returns None rather than silently skipping stops.
-
     # ── Solver configuration ───────────────────────────────────────
-    # PARALLEL_CHEAPEST_INSERTION: builds an initial solution by repeatedly
-    # inserting the cheapest unassigned stop into an existing route.
-    # This works better than PATH_CHEAPEST_ARC for capacity-constrained problems
-    # because it considers multiple routes simultaneously.
-    #
-    # GUIDED_LOCAL_SEARCH: improves the initial solution by exploring neighbouring
-    # solutions (swapping stops between trucks, reordering within a route, etc.)
-    # until the time limit is reached.
     params = pywrapcp.DefaultRoutingSearchParameters()
     params.first_solution_strategy = (
         routing_enums_pb2.FirstSolutionStrategy.PARALLEL_CHEAPEST_INSERTION
@@ -444,51 +407,53 @@ def run_solver(
     sol = mdl.SolveWithParameters(params)
 
     if not sol:
-        log.warning("Solver found no solution | Check: enough trucks? zone conflicts? capacity?")
+        log.warning("Solver found no solution | Check: time windows, capacity, zones, ordering")
         return None, dist_m, time_m
 
     elapsed = time_module.time() - t0
     log.info("Solver finished | %.2fs | objective=%.3f miles",
              elapsed, sol.ObjectiveValue() / COST_SCALE)
 
-    # ── Parse solution into readable route objects ─────────────────
-    tdim     = mdl.GetDimensionOrDie("Time")
-    routes   = []
+    # ── Parse solution ─────────────────────────────────────────────
+    tdim   = mdl.GetDimensionOrDie("Time")
+    routes = []
 
     for v in range(n_vehicles):
         idx        = mdl.Start(v)
         stops_out  = []
-        del_total  = 0.0
-        pick_total = 0.0
+        del_total  = 0
+        pick_total = 0
 
         while not mdl.IsEnd(idx):
             n       = mgr.IndexToNode(idx)
             arrival = sol.Min(tdim.CumulVar(idx))
             stype   = "depot" if n == 0 else ("delivery" if n <= n_deliveries else "pickup")
 
-            if stype == "delivery": del_total  += float(loc_demands[n])
-            if stype == "pickup":   pick_total += float(loc_demands[n])
+            if stype == "delivery": del_total  += int(loc_demands[n])
+            if stype == "pickup":   pick_total += int(loc_demands[n])
 
-            # Convert arrival minutes to a clock time string (starting from 8:00 AM)
-            clock_minutes = 480 + arrival  # 480 = 8 * 60
+            clock_minutes = DAY_START_CLOCK + arrival
             arrival_str   = f"{clock_minutes // 60}:{clock_minutes % 60:02d}"
+            win_e, win_l  = loc_windows[n]
 
             stops_out.append({
-                "node":         n,
-                "name":         loc_names[n],
-                "type":         stype,
-                "zone":         stop_zones[n],
-                "priority":     priorities[n],
-                "arrival_min":  arrival,
-                "arrival_time": arrival_str,
-                "service_min":  float(loc_svc[n]),
-                "demand":       float(loc_demands[n]),
+                "node":          n,
+                "name":          loc_names[n],
+                "type":          stype,
+                "zone":          stop_zones[n],
+                "priority":      priorities[n],
+                "arrival_min":   arrival,
+                "arrival_time":  arrival_str,
+                "window_open":   int(win_e),
+                "window_close":  int(win_l),
+                "window_label":  f"{fmt_clock(int(win_e))} – {fmt_clock(int(win_l))}",
+                "service_min":   int(loc_svc[n]),
+                "demand":        int(loc_demands[n]),
             })
             idx = sol.Value(mdl.NextVar(idx))
 
-        # Return-to-depot stop
         final_arrival = sol.Min(tdim.CumulVar(idx))
-        clock_ret     = 480 + final_arrival
+        clock_ret     = DAY_START_CLOCK + final_arrival
         stops_out.append({
             "node":         0,
             "name":         loc_names[0],
@@ -497,14 +462,16 @@ def run_solver(
             "priority":     0,
             "arrival_min":  final_arrival,
             "arrival_time": f"{clock_ret // 60}:{clock_ret % 60:02d}",
-            "service_min":  0.0,
-            "demand":       0.0,
+            "window_open":  0,
+            "window_close": DAY_END_MIN,
+            "window_label": "",
+            "service_min":  0,
+            "demand":       0,
         })
 
-        # Only include trucks that were actually used (have at least one real stop)
         if len(stops_out) > 2:
             td = trailer_defs[v]
-            log.info("  %s (%s) | departs %.1f units | picks up %.1f units | %d stops",
+            log.info("  %s (%s) | departs %d pallets | picks up %d pallets | %d stops",
                      fleet[v]["id"], fleet[v]["trailer"], del_total, pick_total,
                      len(stops_out) - 2)
             routes.append({
@@ -512,37 +479,32 @@ def run_solver(
                 "trailer_type":   fleet[v]["trailer"],
                 "truck_color":    td["color"],
                 "description":    td["description"],
-                "departure_load": round(del_total, 2),
-                "delivery_load":  round(del_total, 2),
-                "pickup_load":    round(pick_total, 2),
-                "capacity":       float(capacities[v]),
+                "departure_load": del_total,
+                "delivery_load":  del_total,
+                "pickup_load":    pick_total,
+                "capacity":       capacities[v],
                 "allowed_zones":  td["allowed_zones"],
                 "stops":          stops_out,
                 "node_sequence":  [s["node"] for s in stops_out],
             })
 
-    total_miles = round(sol.ObjectiveValue() / COST_SCALE, 3)
-    log.info("Solution: %d trucks used | %.3f total miles", len(routes), total_miles)
+    total_miles = round(sol.ObjectiveValue() / COST_SCALE, 1)
+    log.info("Solution: %d trucks used | %.1f total miles", len(routes), total_miles)
 
     return {
         "total_distance_miles": total_miles,
         "routes":               routes,
         "locations":            loc_names,
         "coords":               [list(c) for c in loc_coords],
-        "distances":            dist_m,   # miles
-        "times":                time_m,   # minutes (floats)
+        "distances":            dist_m,
+        "times":                time_m,
     }, dist_m, time_m
 
 
 # ── Request validation helper ──────────────────────────────────────────────────
 
-def validate_stop(stop: dict, label: str) -> None:
-    """
-    Validates that a stop dict from the request body has all required fields
-    and that the coordinate values are within plausible geographic ranges.
-
-    Raises ValueError with a descriptive message if anything is missing or invalid.
-    """
+def validate_stop(stop, label):
+    """Validates a single stop dict from the request body."""
     if not stop.get("name", "").strip():
         raise ValueError(f"{label} is missing a name.")
 
@@ -557,21 +519,40 @@ def validate_stop(stop: dict, label: str) -> None:
         raise ValueError(f"{label} '{stop.get('name')}' has an invalid longitude: {lon}")
 
     demand = stop.get("demand", 0)
-    if float(demand) < 0:
+    if int(demand) < 0:
         raise ValueError(f"{label} '{stop.get('name')}' has a negative demand: {demand}")
+
+    # Validate time window if provided
+    we = stop.get("window_open")
+    wl = stop.get("window_close")
+    if we is not None and wl is not None:
+        if int(we) > int(wl):
+            raise ValueError(f"{label} '{stop.get('name')}' has an invalid time window: "
+                             f"opens after it closes.")
+
+
+def parse_window(stop):
+    """
+    Extract a stop's time window in minutes-from-day-start.
+    Defaults to the full working day (0, DAY_END_MIN) if not specified.
+    The frontend sends window_open / window_close as minute offsets.
+    """
+    we = stop.get("window_open")
+    wl = stop.get("window_close")
+    earliest = int(we) if we is not None else DAY_START_MIN
+    latest   = int(wl) if wl is not None else DAY_END_MIN
+    return (earliest, latest)
 
 
 # ── Flask routes ───────────────────────────────────────────────────────────────
 
 @app.route('/')
 def index():
-    """Serve the main frontend HTML file."""
     return send_from_directory('static', 'index.html')
 
 
 @app.route('/trailer_types', methods=['GET'])
 def trailer_types():
-    """Return the full trailer type definitions so the frontend can build its UI."""
     return jsonify(TRAILER_DEFS)
 
 
@@ -581,17 +562,18 @@ def solve_route():
     Main optimization endpoint.
 
     POST body (JSON):
-        depot:                 str   — depot location name (already geocoded by frontend)
+        depot:                 str
         depot_coords:          [lat, lon]
-        deliveries:            list of stop objects (name, coords, demand, zone, priority)
-        pickups:               list of stop objects (name, coords, demand, zone, priority)
+        deliveries:            list of {name, coords, demand, zone, priority,
+                                        window_open?, window_close?}
+        pickups:               same shape as deliveries
         fleet:                 list of {"trailer": type, "id": str}
-        delivery_service_time: float — minutes spent unloading at each delivery stop
-        pickup_service_time:   float — minutes spent loading at each pickup stop
+        delivery_service_time: int (minutes)
+        pickup_service_time:   int (minutes)
 
-    GET: runs a hardcoded demo problem (useful for testing the connection).
-
-    Returns JSON with routes, total distance, and the distance/time matrices.
+    window_open / window_close are minutes from 8:00 AM (t=0).
+    Example: a 12pm-1pm window is window_open=240, window_close=300.
+    They are optional — omitted stops default to the full working day.
     """
     request_id = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
     log.info("=== /solve request %s | method=%s | ip=%s ===",
@@ -601,17 +583,15 @@ def solve_route():
         if request.method == 'POST':
             body = request.get_json(force=True, silent=True)
             if not body:
-                log.warning("Request %s | invalid or missing JSON body", request_id)
                 return jsonify({"error": "Request body must be valid JSON."}), 400
 
             deliveries = body.get('deliveries', [])
             pickups    = body.get('pickups',    [])
             n_del      = len(deliveries)
-            del_svc    = float(body.get('delivery_service_time', 20))
-            pick_svc   = float(body.get('pickup_service_time',   45))
+            del_svc    = int(body.get('delivery_service_time', 20))
+            pick_svc   = int(body.get('pickup_service_time',   45))
             fleet      = body.get('fleet', [])
 
-            # ── Input validation ───────────────────────────────────
             if not deliveries and not pickups:
                 return jsonify({"error": "Add at least one delivery or pickup stop."}), 400
 
@@ -650,11 +630,14 @@ def solve_route():
             loc_coords  = ([tuple(depot_coords)]
                            + [tuple(d['coords']) for d in deliveries]
                            + [tuple(p['coords']) for p in pickups])
-            loc_demands = ([0.0]
-                           + [float(abs(d['demand'])) for d in deliveries]
-                           + [float(abs(p['demand'])) for p in pickups])
-            loc_svc     = [0.0] + [del_svc] * n_del + [pick_svc] * len(pickups)
-            loc_windows = [(0, 600)] * len(loc_names)
+            loc_demands = ([0]
+                           + [int(abs(d['demand'])) for d in deliveries]
+                           + [int(abs(p['demand'])) for p in pickups])
+            loc_svc     = [0] + [del_svc] * n_del + [pick_svc] * len(pickups)
+            # Per-stop time windows (depot is always open the full day)
+            loc_windows = ([(DAY_START_MIN, DAY_END_MIN)]
+                           + [parse_window(d) for d in deliveries]
+                           + [parse_window(p) for p in pickups])
             stop_zones  = (["depot"]
                            + [d.get('zone', 'commercial') for d in deliveries]
                            + [p.get('zone', 'commercial') for p in pickups])
@@ -662,23 +645,36 @@ def solve_route():
                            + [int(d.get('priority', 1)) for d in deliveries]
                            + [int(p.get('priority', 1)) for p in pickups])
 
+            # ── Pre-solve feasibility check (needs the time matrix) ──
+            # Fetch the matrix once here so we can validate windows before solving.
+            dist_m, time_m = get_matrices_from_osrm(loc_coords)
+            feas_errors = check_feasibility(loc_names, loc_demands, loc_windows, loc_svc,
+                                            stop_zones, fleet, time_m, n_del)
+            if feas_errors:
+                log.warning("Request %s | infeasible before solve | %s", request_id, feas_errors)
+                return jsonify({
+                    "error": "The problem is infeasible:\n• " + "\n• ".join(feas_errors)
+                }), 400
+
         else:
-            # ── GET: demo problem ──────────────────────────────────
-            # Realistic pallet counts — 53ft trailer holds 26 pallets max.
-            # 2 deliveries (10+8 pallets) and 2 pickups (6+12 pallets).
-            log.info("Request %s | GET demo problem", request_id)
+            # ── GET: demo problem with time windows ────────────────
+            # Demonstrates the new window feature:
+            #   O'Hare accepts deliveries only 10:00am-12:00pm  (window 120-240)
+            #   Willis Tower accepts deliveries only 9:00am-1:00pm (window 60-300)
+            #   Navy Pier pickups only after 2:00pm (window 360-600)
+            #   Schaumburg pickups only after 1:00pm (window 300-600)
+            log.info("Request %s | GET demo problem (with time windows)", request_id)
             loc_names   = ["Depot (Addison, IL)", "O'Hare Airport", "Willis Tower", "Navy Pier", "Schaumburg"]
             loc_coords  = [(41.9314, -88.0126), (41.9742, -87.9073), (41.8789, -87.6359),
                            (41.8917, -87.6086), (42.0334, -88.0834)]
             loc_demands = [0, 10, 8, 6, 12]
             fleet       = [{"trailer": "53ft", "id": f"Truck-{i+1}"} for i in range(3)]
             loc_svc     = [0, 20, 20, 45, 45]
-            loc_windows = [(0, 600)] * 5
+            loc_windows = [(0, 600), (120, 240), (60, 300), (360, 600), (300, 600)]
             n_del       = 2
             stop_zones  = ["depot", "airport", "commercial", "commercial", "industrial"]
             priorities  = [0, 1, 1, 1, 1]
 
-        # ── Run solver ─────────────────────────────────────────────
         result, _, _ = run_solver(
             loc_names, loc_coords, loc_demands, fleet,
             loc_svc, loc_windows, n_del, stop_zones, priorities
@@ -686,42 +682,28 @@ def solve_route():
 
         if not result:
             msg = ("No solution found. Possible causes: "
+                   "time windows are too tight to satisfy together, "
                    "not enough trucks for the total cargo, "
                    "zone restrictions prevent some stops from being reached, "
-                   "or time windows are too tight.")
+                   "or the delivery-before-pickup ordering cannot fit in the working day.")
             log.warning("Request %s | no solution | %s", request_id, msg)
             return jsonify({"error": msg}), 400
 
-        log.info("Request %s | success | %d routes | %.3f miles",
+        log.info("Request %s | success | %d routes | %.1f miles",
                  request_id, len(result["routes"]), result["total_distance_miles"])
         return jsonify(result)
 
     except ValueError as e:
-        # Input validation errors — tell the user what to fix
         log.warning("Request %s | validation error: %s", request_id, e)
         return jsonify({"error": str(e)}), 400
 
     except Exception as e:
-        # Unexpected errors — log full traceback, return safe message
         log.error("Request %s | unexpected error: %s\n%s", request_id, e, traceback.format_exc())
         return jsonify({"error": f"Internal server error: {e}"}), 500
 
 
 @app.route('/geometry', methods=['POST'])
 def geometry():
-    """
-    Fetches road-following polylines for a set of already-solved routes.
-
-    Called after /solve returns — takes the solved node sequences and
-    fetches the actual GPS paths from OSRM so Leaflet can draw them on the map.
-
-    POST body:
-        coords: list of [lat, lon] for all locations (depot + all stops)
-        routes: list of node-index sequences (one per truck)
-
-    Returns:
-        {"geometries": [[lat, lon], ...] per truck}
-    """
     log.info("/geometry request | ip=%s", request.remote_addr)
     try:
         body = request.get_json(force=True, silent=True)
